@@ -1,0 +1,40 @@
+/* cpp-newsletter-archive.css v0 — styles for the My Newsletters widget */
+.cna { width: 100%; max-width: 100%; margin: 1em 0; padding: 0; font-family: inherit; color: #1f2937; line-height: 1.5; box-sizing: border-box; }
+.cna .cna-subhead { color: #666; margin: 0 0 1.5em 0; font-size: 0.95rem; }
+.cna #auth-status { padding: 0.75em 1em; margin: 1em 0; border-radius: 6px; font-size: 0.9em; }
+.cna #auth-status.pending { background: #fffbe6; border: 1px solid #ffe58f; }
+.cna #auth-status.success { background: #f6ffed; border: 1px solid #b7eb8f; }
+.cna #auth-status.failure { background: #fff1f0; border: 1px solid #ffa39e; }
+.cna #auth-status.info    { background: #e7f3ff; border: 1px solid #91caff; }
+.cna .cna-loading, .cna .cna-empty-state, .cna .cna-error { text-align: center; padding: 3em 1em; color: #666; }
+.cna .cna-error { color: #991b1b; }
+.cna .cna-entries { display: flex; flex-direction: column; gap: 0.75em; margin-top: 1.5em; }
+.cna .cna-entry { border: 1px solid #e0e0e0; border-radius: 6px; background: #fff; overflow: hidden; transition: box-shadow 0.15s ease; }
+.cna .cna-entry:hover { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.07); }
+.cna .cna-entry-header { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: start; gap: 0.25em 1em; padding: 1em 1.25em; cursor: pointer; user-select: none; background: transparent; border: 0; width: 100%; text-align: left; font: inherit; color: inherit; }
+.cna .cna-entry-header:focus-visible { outline: 2px solid #4a6c9a; outline-offset: -2px; }
+.cna .cna-entry-subject { grid-column: 1; grid-row: 1; margin: 0; font-size: 1.05rem; font-weight: 600; color: #1a1a1a; }
+.cna .cna-entry-meta { grid-column: 1; grid-row: 2; font-size: 0.875rem; color: #666; }
+.cna .cna-entry-pub { color: #4a6c9a; font-weight: 500; }
+.cna .cna-entry-divider { margin: 0 0.4em; color: #bbb; }
+.cna .cna-entry-toggle { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 1.25rem; color: #999; transition: transform 0.2s ease; }
+.cna .cna-entry[data-expanded] .cna-entry-toggle { transform: rotate(180deg); }
+.cna .cna-entry-body { padding: 0 1.25em 1.25em 1.25em; border-top: 1px solid #e8e8e8; }
+.cna .cna-entry-body[hidden] { display: none; }
+.cna .cna-entry-content { padding-top: 1em; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.cna .cna-entry-content img { max-width: 100%; height: auto; }
+.cna .cna-entry-content table { max-width: 100%; }
+@media (max-width: 600px) { .cna .cna-entry-header { padding: 0.875em 1em; } .cna .cna-entry-body { padding: 0 1em 1em 1em; } }
+
+/* --- Lightbox for inline images (bulletin page reads, etc.) --- */
+.cna .cna-entry-content img { cursor: zoom-in; }
+.cna-lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.92); z-index: 2147483647; display: flex; align-items: center; justify-content: center; padding: 1em; box-sizing: border-box; }
+.cna-lightbox img { max-width: 95vw; max-height: 95vh; object-fit: contain; box-shadow: 0 4px 32px rgba(0, 0, 0, 0.5); cursor: zoom-out; }
+.cna-lightbox-close, .cna-lightbox-prev, .cna-lightbox-next { position: absolute; background: rgba(255, 255, 255, 0.15); color: #fff; border: 0; cursor: pointer; line-height: 1; transition: background 0.15s ease; padding: 0; }
+.cna-lightbox-close:hover, .cna-lightbox-prev:hover, .cna-lightbox-next:hover { background: rgba(255, 255, 255, 0.3); }
+.cna-lightbox-close { top: 1em; right: 1em; width: 2.5em; height: 2.5em; border-radius: 50%; font-size: 1.5em; }
+.cna-lightbox-prev, .cna-lightbox-next { top: 50%; transform: translateY(-50%); width: 3em; height: 4em; font-size: 2em; border-radius: 4px; }
+.cna-lightbox-prev { left: 1em; }
+.cna-lightbox-next { right: 1em; }
+.cna-lightbox-counter { position: absolute; bottom: 1em; left: 50%; transform: translateX(-50%); color: #fff; background: rgba(0, 0, 0, 0.5); padding: 0.3em 0.9em; border-radius: 4px; font-size: 0.9em; }
+@media (max-width: 600px) { .cna-lightbox-prev, .cna-lightbox-next { width: 2.5em; height: 3em; font-size: 1.5em; } .cna-lightbox-close { width: 2em; height: 2em; font-size: 1.2em; } }
