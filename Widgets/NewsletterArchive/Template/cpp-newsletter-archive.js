@@ -318,6 +318,70 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         fetch(url, { method: 'GET' }).catch(function() { /* silent */ });
     }
 
+    // --- View-mode persistence -----------------------------------------
+    var VIEW_MODE_KEY = 'cna-view-mode';
+    var VIEW_MODE_DEFAULT = 'compact';
+
+    function getViewMode() {
+        try {
+            var v = localStorage.getItem(VIEW_MODE_KEY);
+            return (v === 'compact' || v === 'expanded') ? v : VIEW_MODE_DEFAULT;
+        } catch (e) { return VIEW_MODE_DEFAULT; }
+    }
+
+    function setViewMode(mode) {
+        try { localStorage.setItem(VIEW_MODE_KEY, mode); } catch (e) { /* swallow */ }
+    }
+
+    // --- Expanded-view extraction --------------------------------------
+    // Pull a featured image + preview snippet from the email Body HTML.
+    // Used only when view-mode = expanded; lazy-computed per render.
+
+    function extractFeaturedImage(bodyHtml) {
+        if (!bodyHtml) return null;
+        try {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(bodyHtml, 'text/html');
+            var imgs = doc.querySelectorAll('img');
+            for (var i = 0; i < imgs.length; i++) {
+                var img = imgs[i];
+                var src = img.getAttribute('src') || '';
+                if (!src) continue;
+                // Skip data: URIs, mailto: links, and javascript: refs
+                if (/^(data:|javascript:|mailto:)/i.test(src)) continue;
+                // Skip <50x50 images — usually tracker pixels or banner glyphs
+                var w = parseInt(img.getAttribute('width'), 10);
+                var h = parseInt(img.getAttribute('height'), 10);
+                if ((w && w < 50) || (h && h < 50)) continue;
+                return { src: src, alt: img.getAttribute('alt') || '' };
+            }
+            return null;
+        } catch (e) { return null; }
+    }
+
+    function extractPreview(bodyHtml, maxChars) {
+        if (!bodyHtml) return '';
+        try {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(bodyHtml, 'text/html');
+            // Strip script/style so their content doesn't leak into the preview
+            doc.querySelectorAll('script, style').forEach(function(n) { n.remove(); });
+            var text = (doc.body && doc.body.textContent ? doc.body.textContent : '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            // Strip the Outlook external-sender caution banner if present
+            text = text
+                .replace(/^You don't often get email from[^.]*\.\s*Learn why this is important\s*/i, '')
+                .replace(/^CAUTION:\s*This email originated from outside your organization\.\s*Exercise caution[^.]+\.\s*/i, '')
+                .trim();
+            if (text.length > maxChars) {
+                // Trim back to a word boundary so we don't slice mid-word
+                text = text.substring(0, maxChars).replace(/\s+\S*$/, '') + '…';
+            }
+            return text;
+        } catch (e) { return ''; }
+    }
+
     // --- Rendering helpers ---------------------------------------------
     function fmtDate(iso) {
         if (!iso) return '';
@@ -345,15 +409,25 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                 + '</div>';
             return;
         }
+        var mode = getViewMode();
         var items = rows.map(function(r) {
+            var img = extractFeaturedImage(r.Body);
+            var preview = extractPreview(r.Body, 240);
+            var thumbHtml = img
+                ? '<img class="cna-entry-thumb" src="' + escapeHtml(img.src) + '" alt="' + escapeHtml(img.alt) + '" loading="lazy">'
+                : '<div class="cna-entry-thumb cna-entry-thumb-placeholder" aria-hidden="true"></div>';
             return ''
                 + '<article class="cna-entry" data-comm-id="' + escapeHtml(r.Communication_ID) + '" data-pub-id="' + escapeHtml(r.Publication_ID) + '">'
                 +   '<button type="button" class="cna-entry-header" data-toggle>'
-                +     '<h3 class="cna-entry-subject">' + escapeHtml(r.Subject) + '</h3>'
-                +     '<div class="cna-entry-meta">'
-                +       '<span class="cna-entry-pub">' + escapeHtml(r.Publication_Title) + '</span>'
-                +       '<span class="cna-entry-divider">&middot;</span>'
-                +       '<span class="cna-entry-date">' + escapeHtml(fmtDate(r.Sent_Date)) + '</span>'
+                +     thumbHtml
+                +     '<div class="cna-entry-headline-wrap">'
+                +       '<h3 class="cna-entry-subject">' + escapeHtml(r.Subject) + '</h3>'
+                +       (preview ? '<div class="cna-entry-preview">' + escapeHtml(preview) + '</div>' : '')
+                +       '<div class="cna-entry-meta">'
+                +         '<span class="cna-entry-pub">' + escapeHtml(r.Publication_Title) + '</span>'
+                +         '<span class="cna-entry-divider">&middot;</span>'
+                +         '<span class="cna-entry-date">' + escapeHtml(fmtDate(r.Sent_Date)) + '</span>'
+                +       '</div>'
                 +     '</div>'
                 +     '<span class="cna-entry-toggle" aria-hidden="true">&#9662;</span>'
                 +   '</button>'
@@ -363,8 +437,31 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                 + '</article>';
         }).join('');
         root.innerHTML =
-            '<p class="cna-subhead">' + rows.length + ' archived item' + (rows.length === 1 ? '' : 's') + ' available &mdash; click any to expand.</p>'
-            + '<div class="cna-entries">' + items + '</div>';
+            '<div class="cna-toolbar">'
+            +   '<p class="cna-summary">' + rows.length + ' archived item' + (rows.length === 1 ? '' : 's') + ' available &mdash; click any to expand.</p>'
+            +   '<div class="cna-view-toggle" role="group" aria-label="View mode">'
+            +     '<button type="button" class="cna-view-btn" data-view-mode="compact" aria-pressed="' + (mode === 'compact' ? 'true' : 'false') + '">Compact</button>'
+            +     '<button type="button" class="cna-view-btn" data-view-mode="expanded" aria-pressed="' + (mode === 'expanded' ? 'true' : 'false') + '">Expanded</button>'
+            +   '</div>'
+            + '</div>'
+            + '<div class="cna-entries" data-view-mode="' + mode + '">' + items + '</div>';
+
+        // View-mode toggle handler — switches between Compact and Expanded
+        // via a data-view-mode attribute on .cna-entries (CSS handles the swap).
+        // No re-render needed; localStorage remembers across visits.
+        root.querySelectorAll('.cna-view-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var newMode = btn.getAttribute('data-view-mode');
+                if (newMode !== 'compact' && newMode !== 'expanded') return;
+                setViewMode(newMode);
+                var entriesEl = root.querySelector('.cna-entries');
+                if (entriesEl) entriesEl.setAttribute('data-view-mode', newMode);
+                root.querySelectorAll('.cna-view-btn').forEach(function(b) {
+                    b.setAttribute('aria-pressed', b.getAttribute('data-view-mode') === newMode ? 'true' : 'false');
+                });
+                logEngagement('newsletter-view-mode-change', newMode, '');
+            });
+        });
 
         // Expand-toggle handler
         root.querySelectorAll('[data-toggle]').forEach(function(btn) {
