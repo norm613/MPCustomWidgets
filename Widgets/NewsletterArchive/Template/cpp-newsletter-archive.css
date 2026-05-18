@@ -49,8 +49,15 @@
 .cna .cna-sidebar-item:focus-visible { outline: 2px solid #4a6c9a; outline-offset: -2px; }
 .cna .cna-sidebar-item[data-hidden="false"] { border-left-color: #4a6c9a; }
 .cna .cna-sidebar-item[data-hidden="true"] { opacity: 0.45; }
-.cna .cna-sidebar-item-icon { width: 26px; height: 26px; flex-shrink: 0; background: #4a6c9a; color: #fff; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.78rem; font-weight: 600; }
+/* Pub-identity avatar: small SQUARE (was circle). Always renders a first-letter
+   <span> behind a (lazy) <img> overlay. If the Pub has a Publication_Default_Image_URL,
+   the <img> covers the letter; if absent or load fails (onerror hides the img),
+   the letter shows through. Both layers fit a 26x26 square with 4px rounded corners. */
+.cna .cna-sidebar-item-icon { width: 26px; height: 26px; flex-shrink: 0; background: #4a6c9a; color: #fff; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.78rem; font-weight: 600; position: relative; overflow: hidden; }
+.cna .cna-sidebar-item-icon-letter { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.cna .cna-sidebar-item-icon-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; border-radius: 4px; }
 .cna .cna-sidebar-item[data-hidden="true"] .cna-sidebar-item-icon { background: #aaa; }
+.cna .cna-sidebar-item[data-hidden="true"] .cna-sidebar-item-icon-img { opacity: 0.55; }
 .cna .cna-sidebar-item-label { flex-grow: 1; font-size: 0.9rem; color: #1a1a1a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .cna .cna-sidebar-item-count { font-size: 0.78rem; color: #777; flex-shrink: 0; }
 .cna .cna-sidebar[data-collapsed="true"] .cna-sidebar-item-label,

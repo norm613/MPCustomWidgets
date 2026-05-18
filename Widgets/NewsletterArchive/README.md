@@ -33,7 +33,8 @@ Widgets/NewsletterArchive/
 │   ├── 05-register-procedures.sql                         — dp_API_Procedures + dp_Role_API_Procedures grants
 │   ├── 06-smoke-test.sql                                  — cross-tenant verification queries
 │   ├── 07-alter-sp-GetMyNewsletterArchive-image-cascade.sql — 4-tier dp_Files cascade
-│   └── 08-add-pub-use-body-image-flag.sql                 — Use_First_Body_Image_For_Featured column + Pub 14 opt-in
+│   ├── 08-add-pub-use-body-image-flag.sql                 — Use_First_Body_Image_For_Featured column + Pub 14 opt-in
+│   └── 09-alter-sp-add-publication-default-image-url.sql  — Publication_Default_Image_URL column (Tier-2 only) for sidebar avatars
 ├── StoredProc/
 │   ├── api_Custom_CreatePublicationArchive.sql            — PA-callable ingestion target
 │   └── api_Custom_GetMyNewsletterArchive.sql              — widget-callable cascade reader (current canonical state)
@@ -60,12 +61,21 @@ number of publications in the result set).
 | **Grouping** | Inbox / By Publication | `cna-grouping` | `inbox` |
 | **Display density** | Compact / Expanded | `cna-view-mode` | `compact` |
 
-**Publications sidebar (left rail)** lists every publication that appears
+**Newsletters sidebar (left rail)** lists every publication that appears
 in the current SP result set. Each row is a clickable toggle that shows or
 hides that publication's entries from the main listing. The row shows a
-first-letter avatar, the publication title, and a count of how many entries
-are currently in the dataset for that publication. The avatar tints gray
-and the row dims when hidden.
+small square Pub-identity avatar, the publication title, and a count of
+how many entries are currently in the dataset for that publication. The
+row dims when hidden.
+
+The avatar uses the Publication's own default image (the SP's
+`Publication_Default_Image_URL` — Tier-2 lookup, no fallback to Unsorted
+or Domain) rendered as a 26×26 square with 4px rounded corners and
+`object-fit: cover` center-crop. When the Publication has no `dp_Files`
+image attached (or the image fails to load at runtime), the avatar falls
+back to a first-letter monogram on the same square. Both layers render in
+the same slot — the image is overlaid on top of an always-rendered letter
+span, so a fallback is automatic on image error.
 
 A collapse button at the top of the sidebar shrinks the rail to a 56px
 icon-only column (first-letter avatars only). At the bottom of the rail,

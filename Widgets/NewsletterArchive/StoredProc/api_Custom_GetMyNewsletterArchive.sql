@@ -20,6 +20,12 @@
 --                         widget to fall back to JS body-extraction for opted-in
 --                         Publications (e.g., AxiosHQ-style newsletters where
 --                         the first inline image is the issue's canonical hero).
+--   Phase 3b  Schema/09 — Added Publication_Default_Image_URL column to the
+--                         result set. Resolves the Publication's own attached
+--                         image (Tier-2 lookup only, no fallback, no per-Pub
+--                         opt-out). Used by the widget sidebar to render a
+--                         small square Pub-identity avatar; falls back
+--                         client-side to a first-letter avatar when NULL.
 --
 -- ----------------------------------------------------------------------------
 -- Called from: MPCustomWidgets framework with data-requireUser="true".
@@ -210,7 +216,20 @@ BEGIN
                    AND f4.Domain_ID = @DomainID
                  ORDER BY f4.Default_Image DESC, f4.UTC_Date_Added DESC)
             )
-        END                    AS Featured_Image_URL
+        END                    AS Featured_Image_URL,
+        -- Schema/09: Publication's own default image — Tier-2 lookup only,
+        -- no per-Pub opt-out, no Unsorted/Domain fallback. Used by the widget
+        -- sidebar as a square Pub-identity avatar. NULL if the Publication
+        -- has no dp_Files attached; widget falls back to first-letter avatar.
+        (SELECT TOP 1 @FileUrlPrefix + CAST(fp.Unique_Name AS NVARCHAR(36))
+         FROM dbo.dp_Files fp
+         WHERE fp.Page_ID  = @PubPageID
+           AND fp.Record_ID = c.Publication_ID
+           AND fp.Image_Width IS NOT NULL
+           AND COALESCE(fp.Publicly_Accessible, 1) = 1
+           AND fp.Domain_ID = @DomainID
+         ORDER BY fp.Default_Image DESC, fp.UTC_Date_Added DESC)
+                               AS Publication_Default_Image_URL
     FROM dbo.dp_Communications c
     INNER JOIN dbo.dp_Publications p
         ON p.Publication_ID = c.Publication_ID
@@ -241,4 +260,4 @@ BEGIN
 END
 GO
 
-PRINT 'Created procedure api_Custom_GetMyNewsletterArchive (current canonical form, post-migration-08).';
+PRINT 'Created procedure api_Custom_GetMyNewsletterArchive (current canonical form, post-migration-09).';

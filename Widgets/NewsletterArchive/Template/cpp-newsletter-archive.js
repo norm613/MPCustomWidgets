@@ -626,7 +626,12 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
 
     // Derive the unique-publications list from a raw row set. Order matches
     // the SP's overall date-desc ordering (newest Pub first by its most-recent
-    // entry). Each entry: {id: Number, title: String, count: Number}.
+    // entry). Each entry: {id, title, count, imageUrl}.
+    //   imageUrl = the Pub's own default image (SP's Publication_Default_Image_URL,
+    //   Tier-2 lookup only; NULL if the Publication has no attached image file).
+    //   Captured from the first row encountered for each Pub. Used by the
+    //   sidebar to render a small square Pub-identity avatar; renderSidebarHtml
+    //   falls back to a first-letter avatar when imageUrl is missing.
     function derivePublications(rows) {
         var seen = {};
         var pubs = [];
@@ -634,7 +639,12 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
             var id = r.Publication_ID;
             var key = String(id || '0');
             if (!seen[key]) {
-                seen[key] = { id: id, title: r.Publication_Title || '(Untitled)', count: 0 };
+                seen[key] = {
+                    id: id,
+                    title: r.Publication_Title || '(Untitled)',
+                    count: 0,
+                    imageUrl: r.Publication_Default_Image_URL || null
+                };
                 pubs.push(seen[key]);
             }
             seen[key].count++;
@@ -650,9 +660,17 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         var hasManualOrder = getPubSortOrder().length > 0;
         var items = pubs.map(function(p) {
             var isHidden = !!hidden[String(p.id)];
+            // Dual-layer avatar: first-letter span always renders behind; if the
+            // Pub has a default image attached in MP, an <img> overlays it. On
+            // image-load error the img hides itself and the letter shows through.
+            var iconInner =
+                  '<span class="cna-sidebar-item-icon-letter" aria-hidden="true">' + escapeHtml(pubInitial(p.title)) + '</span>'
+                + (p.imageUrl
+                    ? '<img class="cna-sidebar-item-icon-img" src="' + escapeHtml(p.imageUrl) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+                    : '');
             return ''
                 + '<button type="button" class="cna-sidebar-item" draggable="true" data-pub-id="' + escapeHtml(p.id) + '" data-hidden="' + (isHidden ? 'true' : 'false') + '" aria-pressed="' + (isHidden ? 'false' : 'true') + '" title="' + escapeHtml(p.title) + (isHidden ? ' (hidden)' : '') + ' — drag to reorder">'
-                +   '<span class="cna-sidebar-item-icon" aria-hidden="true">' + escapeHtml(pubInitial(p.title)) + '</span>'
+                +   '<span class="cna-sidebar-item-icon" aria-hidden="true">' + iconInner + '</span>'
                 +   '<span class="cna-sidebar-item-label">' + escapeHtml(p.title) + '</span>'
                 +   '<span class="cna-sidebar-item-count">' + p.count + '</span>'
                 + '</button>';
@@ -665,7 +683,7 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         return ''
             + '<aside class="cna-sidebar" data-collapsed="' + (collapsed ? 'true' : 'false') + '" aria-label="Publication filter">'
             +   '<div class="cna-sidebar-header">'
-            +     '<h2 class="cna-sidebar-title">Publications</h2>'
+            +     '<h2 class="cna-sidebar-title">Newsletters</h2>'
             +     '<button type="button" class="cna-sidebar-collapse" data-sidebar-collapse aria-label="' + collapseAria + '" title="' + collapseAria + '">' + collapseLabel + '</button>'
             +   '</div>'
             +   '<div class="cna-sidebar-list" role="list">' + items + '</div>'

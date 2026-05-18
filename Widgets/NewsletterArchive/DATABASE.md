@@ -147,6 +147,7 @@ Newsletter Archive entries, ordered by `Sent_Date DESC`, with the 4-tier
 | 04 | Added `Featured_Image_URL` (single-tier: Communication only) |
 | 07 | Expanded to 4-tier cascade: Communication → Publication → Unsorted (Pub 11) → Domain |
 | 08 | Added `CASE WHEN Use_First_Body_Image_For_Featured = 1 THEN NULL ELSE …` branch |
+| 09 | Added `Publication_Default_Image_URL` result column — Tier-2 lookup only (the Pub's own attached image), no per-Pub opt-out and no Unsorted/Domain fallback. Powers the widget sidebar's square Pub-identity avatar; widget falls back to a first-letter avatar when the column is NULL |
 
 Current canonical state lives in `StoredProc/api_Custom_GetMyNewsletterArchive.sql`.
 The `Schema/0[4|7|8]-*.sql` files are migration steps — they exist for
