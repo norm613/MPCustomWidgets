@@ -411,10 +411,20 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         }
         var mode = getViewMode();
         var items = rows.map(function(r) {
-            var img = extractFeaturedImage(r.Body);
+            // Featured image preference cascade:
+            //   1. SP-provided Featured_Image_URL (server-side 3-tier dp_Files cascade:
+            //      Communication-attached → Publication-attached → Unsorted Publication-attached)
+            //   2. JS-side extraction from first non-tiny <img> in Body HTML (fallback)
+            //   3. Dashed placeholder if neither yields anything
+            var img;
+            if (r.Featured_Image_URL) {
+                img = { src: r.Featured_Image_URL, alt: r.Publication_Title || r.Subject || '' };
+            } else {
+                img = extractFeaturedImage(r.Body);
+            }
             var preview = extractPreview(r.Body, 240);
             var thumbHtml = img
-                ? '<img class="cna-entry-thumb" src="' + escapeHtml(img.src) + '" alt="' + escapeHtml(img.alt) + '" loading="lazy">'
+                ? '<img class="cna-entry-thumb" src="' + escapeHtml(img.src) + '" alt="' + escapeHtml(img.alt) + '" loading="lazy" onerror="this.style.display=\'none\'">'
                 : '<div class="cna-entry-thumb cna-entry-thumb-placeholder" aria-hidden="true"></div>';
             return ''
                 + '<article class="cna-entry" data-comm-id="' + escapeHtml(r.Communication_ID) + '" data-pub-id="' + escapeHtml(r.Publication_ID) + '">'
