@@ -3,8 +3,9 @@
 Authenticated-only archive of past publications (bulletins, newsletters, meeting
 notes, etc.) for a logged-in MP user. Each archived item is rendered as a
 clickable entry that expands to show the full HTML body inline. Images open in
-a lightbox with keyboard navigation. Two orthogonal view toggles let the user
-combine display density and grouping freely.
+a lightbox with keyboard navigation. A collapsible left sidebar lists the
+publications in the result set and lets the user filter which ones are
+visible; two orthogonal toolbar toggles control grouping and display density.
 
 ## Visibility cascade
 
@@ -46,16 +47,37 @@ each migration does.
 
 ## View options
 
-The toolbar shows two independent toggles, each persisted to `localStorage`:
+Three independent dimensions, each persisted to `localStorage`. The four
+combinations of grouping × density combine with the publication filter so
+the user can land on any of `2 × 2 × 2^N` view states (where N is the
+number of publications in the result set).
 
-| Toggle | Values | localStorage key | Default |
+| Control | Values | localStorage key | Default |
 |---|---|---|---|
+| **Publication filter** | per-Pub show/hide | `cna-hidden-pub-ids` (JSON array) | all shown |
+| **Sidebar width** | expanded / collapsed (icon-only) | `cna-sidebar-collapsed` (`0`/`1`) | expanded |
 | **Grouping** | Inbox / By Publication | `cna-grouping` | `inbox` |
 | **Display density** | Compact / Expanded | `cna-view-mode` | `compact` |
 
-The two axes combine — any of the 4 combinations is valid. Each toggle is
-remembered separately, so a user who prefers "Expanded + By Publication"
-keeps that combo across visits.
+**Publications sidebar (left rail)** lists every publication that appears
+in the current SP result set. Each row is a clickable toggle that shows or
+hides that publication's entries from the main listing. The row shows a
+first-letter avatar, the publication title, and a count of how many entries
+are currently in the dataset for that publication. The avatar tints gray
+and the row dims when hidden.
+
+A collapse button at the top of the sidebar shrinks the rail to a 56px
+icon-only column (first-letter avatars only). At the bottom of the rail,
+"Show all" clears the hidden set, and "Hide all" marks every currently-known
+publication hidden — the second is useful for "filter to a single Pub" (hide
+all, then click one). The filter runs before grouping, so all combinations
+compose cleanly.
+
+The hidden set tracks only what's been explicitly hidden, so any new
+Publication that appears in the result set later is visible by default.
+
+On screens narrower than 800px the sidebar reflows to a horizontal
+scrolling pill row above the toolbar — no off-canvas drawer.
 
 **Inbox** is a flat list ordered by `Sent_Date DESC` (whatever the SP returns
 top-down).
@@ -63,7 +85,8 @@ top-down).
 **By Publication** groups entries under section headings keyed on
 `Publication_ID`, with each group's entries date-sorted within. Group order
 is newest-first by each group's most recent entry (a consequence of the SP's
-overall date-desc ordering).
+overall date-desc ordering). Publications hidden via the sidebar do not
+appear as groups in this mode.
 
 **Compact** shows a one-line entry per row (subject + publication + date).
 
@@ -304,6 +327,8 @@ The widget fires these `api_Custom_LogClick` events:
 | `newsletter-image-zoom` | User clicks an image (opens lightbox) |
 | `newsletter-view-mode-change` | User toggles Compact ↔ Expanded |
 | `newsletter-grouping-change` | User toggles Inbox ↔ By Publication |
+| `newsletter-pub-filter` | User shows / hides a publication in the sidebar (label = `show` / `hide` / `show-all` / `hide-all`; target = Publication_ID for per-item events) |
+| `newsletter-sidebar-collapse` | User toggles the sidebar to collapsed / expanded |
 
 Each event records page URL, page title, target identifier, session ID,
 user agent, and referrer.
