@@ -318,9 +318,15 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         fetch(url, { method: 'GET' }).catch(function() { /* silent */ });
     }
 
-    // --- View-mode persistence -----------------------------------------
+    // --- User preference persistence -----------------------------------
+    // Two orthogonal dimensions:
+    //   view-mode: 'compact' | 'expanded'    — display density per entry
+    //   grouping : 'inbox'   | 'publication' — flat list vs grouped by Pub
+    // Each persists independently in localStorage; user can combine freely.
     var VIEW_MODE_KEY = 'cna-view-mode';
     var VIEW_MODE_DEFAULT = 'compact';
+    var GROUPING_KEY = 'cna-grouping';
+    var GROUPING_DEFAULT = 'inbox';
 
     function getViewMode() {
         try {
@@ -331,6 +337,17 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
 
     function setViewMode(mode) {
         try { localStorage.setItem(VIEW_MODE_KEY, mode); } catch (e) { /* swallow */ }
+    }
+
+    function getGrouping() {
+        try {
+            var v = localStorage.getItem(GROUPING_KEY);
+            return (v === 'inbox' || v === 'publication') ? v : GROUPING_DEFAULT;
+        } catch (e) { return GROUPING_DEFAULT; }
+    }
+
+    function setGrouping(g) {
+        try { localStorage.setItem(GROUPING_KEY, g); } catch (e) { /* swallow */ }
     }
 
     // --- Expanded-view extraction --------------------------------------
@@ -469,6 +486,50 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    // Build the per-row article HTML. Pulled out of renderEntries so the same
+    // markup is reused whether we're rendering a flat inbox list or a
+    // grouped-by-publication section.
+    function renderEntryHtml(r) {
+        // Sanitize body once per row — strips Outlook external-sender caution banner
+        // and 1x1 tracker pixels. Used for both image extraction (so we don't pick
+        // tracker pixels or banner glyphs) AND body rendering (cleaner expanded view).
+        var sanitizedBody = sanitizeBodyForDisplay(r.Body);
+
+        // Featured image preference cascade:
+        //   1. SP-provided Featured_Image_URL (server-side 4-tier dp_Files cascade)
+        //   2. JS-side extraction (3-tier: axImg=1 → width>=300 → first non-tiny)
+        //   3. Dashed placeholder if neither yields anything
+        var img;
+        if (r.Featured_Image_URL) {
+            img = { src: r.Featured_Image_URL, alt: r.Publication_Title || r.Subject || '' };
+        } else {
+            img = extractFeaturedImage(sanitizedBody);
+        }
+        var preview = extractPreview(sanitizedBody, 240);
+        var thumbHtml = img
+            ? '<img class="cna-entry-thumb" src="' + escapeHtml(img.src) + '" alt="' + escapeHtml(img.alt) + '" loading="lazy" onerror="this.style.display=\'none\'">'
+            : '<div class="cna-entry-thumb cna-entry-thumb-placeholder" aria-hidden="true"></div>';
+        return ''
+            + '<article class="cna-entry" data-comm-id="' + escapeHtml(r.Communication_ID) + '" data-pub-id="' + escapeHtml(r.Publication_ID) + '">'
+            +   '<button type="button" class="cna-entry-header" data-toggle>'
+            +     thumbHtml
+            +     '<div class="cna-entry-headline-wrap">'
+            +       '<h3 class="cna-entry-subject">' + escapeHtml(r.Subject) + '</h3>'
+            +       (preview ? '<div class="cna-entry-preview">' + escapeHtml(preview) + '</div>' : '')
+            +       '<div class="cna-entry-meta">'
+            +         '<span class="cna-entry-pub">' + escapeHtml(r.Publication_Title) + '</span>'
+            +         '<span class="cna-entry-divider">&middot;</span>'
+            +         '<span class="cna-entry-date">' + escapeHtml(fmtDate(r.Sent_Date)) + '</span>'
+            +       '</div>'
+            +     '</div>'
+            +     '<span class="cna-entry-toggle" aria-hidden="true">&#9662;</span>'
+            +   '</button>'
+            +   '<div class="cna-entry-body" hidden>'
+            +     '<div class="cna-entry-content">' + (sanitizedBody || '') + '</div>'
+            +   '</div>'
+            + '</article>';
+    }
+
     function renderEntries(rows) {
         var root = document.getElementById('cna-root');
         if (!root) return;
@@ -482,70 +543,83 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
             return;
         }
         var mode = getViewMode();
-        var items = rows.map(function(r) {
-            // Sanitize body once per row — strips Outlook external-sender caution banner
-            // and 1x1 tracker pixels. Used for both image extraction (so we don't pick
-            // tracker pixels or banner glyphs) AND body rendering (cleaner expanded view).
-            var sanitizedBody = sanitizeBodyForDisplay(r.Body);
+        var grouping = getGrouping();
 
-            // Featured image preference cascade:
-            //   1. SP-provided Featured_Image_URL (server-side 4-tier dp_Files cascade)
-            //   2. JS-side extraction (3-tier: axImg=1 → width>=300 → first non-tiny)
-            //   3. Dashed placeholder if neither yields anything
-            var img;
-            if (r.Featured_Image_URL) {
-                img = { src: r.Featured_Image_URL, alt: r.Publication_Title || r.Subject || '' };
-            } else {
-                img = extractFeaturedImage(sanitizedBody);
-            }
-            var preview = extractPreview(sanitizedBody, 240);
-            var thumbHtml = img
-                ? '<img class="cna-entry-thumb" src="' + escapeHtml(img.src) + '" alt="' + escapeHtml(img.alt) + '" loading="lazy" onerror="this.style.display=\'none\'">'
-                : '<div class="cna-entry-thumb cna-entry-thumb-placeholder" aria-hidden="true"></div>';
-            return ''
-                + '<article class="cna-entry" data-comm-id="' + escapeHtml(r.Communication_ID) + '" data-pub-id="' + escapeHtml(r.Publication_ID) + '">'
-                +   '<button type="button" class="cna-entry-header" data-toggle>'
-                +     thumbHtml
-                +     '<div class="cna-entry-headline-wrap">'
-                +       '<h3 class="cna-entry-subject">' + escapeHtml(r.Subject) + '</h3>'
-                +       (preview ? '<div class="cna-entry-preview">' + escapeHtml(preview) + '</div>' : '')
-                +       '<div class="cna-entry-meta">'
-                +         '<span class="cna-entry-pub">' + escapeHtml(r.Publication_Title) + '</span>'
-                +         '<span class="cna-entry-divider">&middot;</span>'
-                +         '<span class="cna-entry-date">' + escapeHtml(fmtDate(r.Sent_Date)) + '</span>'
-                +       '</div>'
-                +     '</div>'
-                +     '<span class="cna-entry-toggle" aria-hidden="true">&#9662;</span>'
-                +   '</button>'
-                +   '<div class="cna-entry-body" hidden>'
-                +     '<div class="cna-entry-content">' + (sanitizedBody || '') + '</div>'
-                +   '</div>'
-                + '</article>';
-        }).join('');
+        // Build entry markup. SP returns rows ordered by Sent_Date DESC overall,
+        // so flat-inbox order is already correct, and within any Publication group
+        // the first row encountered is that group's newest (so groupOrder also
+        // happens to be newest-pub-first naturally).
+        var items;
+        if (grouping === 'publication') {
+            var groups = {};
+            var groupOrder = [];
+            rows.forEach(function(r) {
+                var key = String(r.Publication_ID || '0');
+                if (!groups[key]) {
+                    groups[key] = { title: r.Publication_Title || '(Untitled)', rows: [] };
+                    groupOrder.push(key);
+                }
+                groups[key].rows.push(r);
+            });
+            items = groupOrder.map(function(key) {
+                var g = groups[key];
+                return ''
+                    + '<section class="cna-pub-group">'
+                    +   '<h3 class="cna-pub-group-title">'
+                    +     escapeHtml(g.title)
+                    +     ' <span class="cna-pub-group-count">(' + g.rows.length + ')</span>'
+                    +   '</h3>'
+                    +   '<div class="cna-pub-group-entries">' + g.rows.map(renderEntryHtml).join('') + '</div>'
+                    + '</section>';
+            }).join('');
+        } else {
+            items = rows.map(renderEntryHtml).join('');
+        }
+
         root.innerHTML =
             '<div class="cna-toolbar">'
             +   '<p class="cna-summary">' + rows.length + ' archived item' + (rows.length === 1 ? '' : 's') + ' available &mdash; click any to expand.</p>'
-            +   '<div class="cna-view-toggle" role="group" aria-label="View mode">'
-            +     '<button type="button" class="cna-view-btn" data-view-mode="compact" aria-pressed="' + (mode === 'compact' ? 'true' : 'false') + '">Compact</button>'
-            +     '<button type="button" class="cna-view-btn" data-view-mode="expanded" aria-pressed="' + (mode === 'expanded' ? 'true' : 'false') + '">Expanded</button>'
+            +   '<div class="cna-toolbar-toggles">'
+            +     '<div class="cna-view-toggle" role="group" aria-label="Grouping">'
+            +       '<button type="button" class="cna-view-btn" data-grouping="inbox" aria-pressed="' + (grouping === 'inbox' ? 'true' : 'false') + '">Inbox</button>'
+            +       '<button type="button" class="cna-view-btn" data-grouping="publication" aria-pressed="' + (grouping === 'publication' ? 'true' : 'false') + '">By Publication</button>'
+            +     '</div>'
+            +     '<div class="cna-view-toggle" role="group" aria-label="Display density">'
+            +       '<button type="button" class="cna-view-btn" data-view-mode="compact" aria-pressed="' + (mode === 'compact' ? 'true' : 'false') + '">Compact</button>'
+            +       '<button type="button" class="cna-view-btn" data-view-mode="expanded" aria-pressed="' + (mode === 'expanded' ? 'true' : 'false') + '">Expanded</button>'
+            +     '</div>'
             +   '</div>'
             + '</div>'
-            + '<div class="cna-entries" data-view-mode="' + mode + '">' + items + '</div>';
+            + '<div class="cna-entries" data-view-mode="' + mode + '" data-grouping="' + grouping + '">' + items + '</div>';
 
-        // View-mode toggle handler — switches between Compact and Expanded
-        // via a data-view-mode attribute on .cna-entries (CSS handles the swap).
-        // No re-render needed; localStorage remembers across visits.
-        root.querySelectorAll('.cna-view-btn').forEach(function(btn) {
+        // View-mode toggle handler — Compact / Expanded.
+        // Density-only swap; CSS handles the change via [data-view-mode], no re-render.
+        root.querySelectorAll('.cna-view-btn[data-view-mode]').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 var newMode = btn.getAttribute('data-view-mode');
                 if (newMode !== 'compact' && newMode !== 'expanded') return;
                 setViewMode(newMode);
                 var entriesEl = root.querySelector('.cna-entries');
                 if (entriesEl) entriesEl.setAttribute('data-view-mode', newMode);
-                root.querySelectorAll('.cna-view-btn').forEach(function(b) {
+                root.querySelectorAll('.cna-view-btn[data-view-mode]').forEach(function(b) {
                     b.setAttribute('aria-pressed', b.getAttribute('data-view-mode') === newMode ? 'true' : 'false');
                 });
                 logEngagement('newsletter-view-mode-change', newMode, '');
+            });
+        });
+
+        // Grouping toggle handler — Inbox / By Publication.
+        // Structural change (flat vs <section> wrappers), so a full re-render is
+        // required. We capture `rows` via closure to keep the data stable across
+        // toggles without re-fetching.
+        root.querySelectorAll('.cna-view-btn[data-grouping]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var newGrouping = btn.getAttribute('data-grouping');
+                if (newGrouping !== 'inbox' && newGrouping !== 'publication') return;
+                if (newGrouping === getGrouping()) return; // no-op
+                setGrouping(newGrouping);
+                logEngagement('newsletter-grouping-change', newGrouping, '');
+                renderEntries(rows);
             });
         });
 
