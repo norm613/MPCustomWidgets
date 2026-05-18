@@ -337,26 +337,98 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
     // Pull a featured image + preview snippet from the email Body HTML.
     // Used only when view-mode = expanded; lazy-computed per render.
 
+    // Image extraction — 3-tier preference order:
+    //   Tier A: AxiosHQ content marker (`axImg=1` query param on src)
+    //   Tier B: First image with stated width >= 300 (substantial content image)
+    //   Tier C: First non-tiny <img> (fallback to v1 behavior)
+    // All tiers skip tracker pixels (<50x50), data: URIs, javascript:/mailto: refs.
     function extractFeaturedImage(bodyHtml) {
         if (!bodyHtml) return null;
         try {
             var parser = new DOMParser();
             var doc = parser.parseFromString(bodyHtml, 'text/html');
-            var imgs = doc.querySelectorAll('img');
-            for (var i = 0; i < imgs.length; i++) {
-                var img = imgs[i];
+            var imgs = Array.prototype.slice.call(doc.querySelectorAll('img'));
+
+            // Filter out chrome candidates universally
+            var candidates = imgs.filter(function(img) {
                 var src = img.getAttribute('src') || '';
-                if (!src) continue;
-                // Skip data: URIs, mailto: links, and javascript: refs
-                if (/^(data:|javascript:|mailto:)/i.test(src)) continue;
-                // Skip <50x50 images — usually tracker pixels or banner glyphs
+                if (!src) return false;
+                if (/^(data:|javascript:|mailto:)/i.test(src)) return false;
                 var w = parseInt(img.getAttribute('width'), 10);
                 var h = parseInt(img.getAttribute('height'), 10);
-                if ((w && w < 50) || (h && h < 50)) continue;
-                return { src: src, alt: img.getAttribute('alt') || '' };
+                if ((w && w < 50) || (h && h < 50)) return false;
+                return true;
+            });
+
+            if (!candidates.length) return null;
+
+            // Tier A — AxiosHQ tags every content image with axImg=1
+            for (var i = 0; i < candidates.length; i++) {
+                var src = candidates[i].getAttribute('src') || '';
+                if (/[?&]axImg=1(?:&|$)/.test(src)) {
+                    return { src: src, alt: candidates[i].getAttribute('alt') || '' };
+                }
             }
-            return null;
+
+            // Tier B — largest stated width >= 300
+            var widest = null;
+            var widestW = 0;
+            candidates.forEach(function(img) {
+                var w = parseInt(img.getAttribute('width'), 10) || 0;
+                if (w >= 300 && w > widestW) {
+                    widest = img;
+                    widestW = w;
+                }
+            });
+            if (widest) {
+                return { src: widest.getAttribute('src'), alt: widest.getAttribute('alt') || '' };
+            }
+
+            // Tier C — first non-tiny img
+            return { src: candidates[0].getAttribute('src'), alt: candidates[0].getAttribute('alt') || '' };
         } catch (e) { return null; }
+    }
+
+    // Strip universal email chrome from body HTML before rendering or scanning.
+    // - Outlook external-sender caution banner ("You don't often get email from..." /
+    //   "CAUTION: This email originated from outside your organization...")
+    // - 1x1 / 2x2 tracker pixels (SendGrid open-tracker, similar analytics beacons)
+    // Returns sanitized innerHTML. Fails open: on parse error returns the original.
+    // Universal-only for now; AxiosHQ-specific chrome (masthead/footer) left intact
+    // to preserve publication identity in expanded view.
+    function sanitizeBodyForDisplay(bodyHtml) {
+        if (!bodyHtml) return '';
+        try {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(bodyHtml, 'text/html');
+
+            // 1. Strip Outlook external-sender caution banner.
+            //    Look for tables/divs whose textContent matches the caution patterns
+            //    AND are small enough to be the banner (not the whole body).
+            var bannerPattern = /You don't often get email from|CAUTION:\s*This email originated from outside/i;
+            doc.querySelectorAll('table, div').forEach(function(el) {
+                if (!el.parentNode) return; // already removed via ancestor
+                var t = el.textContent || '';
+                if (bannerPattern.test(t) && t.length < 600) {
+                    el.parentNode.removeChild(el);
+                }
+            });
+
+            // 2. Strip 1x1 / 2x2 tracker pixels
+            doc.querySelectorAll('img').forEach(function(img) {
+                var wAttr = img.getAttribute('width');
+                var hAttr = img.getAttribute('height');
+                var w = wAttr === null ? null : parseInt(wAttr, 10);
+                var h = hAttr === null ? null : parseInt(hAttr, 10);
+                if ((w !== null && w <= 2) || (h !== null && h <= 2)) {
+                    if (img.parentNode) img.parentNode.removeChild(img);
+                }
+            });
+
+            return doc.body ? doc.body.innerHTML : bodyHtml;
+        } catch (e) {
+            return bodyHtml; // fail-safe
+        }
     }
 
     function extractPreview(bodyHtml, maxChars) {
@@ -411,18 +483,22 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         }
         var mode = getViewMode();
         var items = rows.map(function(r) {
+            // Sanitize body once per row — strips Outlook external-sender caution banner
+            // and 1x1 tracker pixels. Used for both image extraction (so we don't pick
+            // tracker pixels or banner glyphs) AND body rendering (cleaner expanded view).
+            var sanitizedBody = sanitizeBodyForDisplay(r.Body);
+
             // Featured image preference cascade:
-            //   1. SP-provided Featured_Image_URL (server-side 3-tier dp_Files cascade:
-            //      Communication-attached → Publication-attached → Unsorted Publication-attached)
-            //   2. JS-side extraction from first non-tiny <img> in Body HTML (fallback)
+            //   1. SP-provided Featured_Image_URL (server-side 4-tier dp_Files cascade)
+            //   2. JS-side extraction (3-tier: axImg=1 → width>=300 → first non-tiny)
             //   3. Dashed placeholder if neither yields anything
             var img;
             if (r.Featured_Image_URL) {
                 img = { src: r.Featured_Image_URL, alt: r.Publication_Title || r.Subject || '' };
             } else {
-                img = extractFeaturedImage(r.Body);
+                img = extractFeaturedImage(sanitizedBody);
             }
-            var preview = extractPreview(r.Body, 240);
+            var preview = extractPreview(sanitizedBody, 240);
             var thumbHtml = img
                 ? '<img class="cna-entry-thumb" src="' + escapeHtml(img.src) + '" alt="' + escapeHtml(img.alt) + '" loading="lazy" onerror="this.style.display=\'none\'">'
                 : '<div class="cna-entry-thumb cna-entry-thumb-placeholder" aria-hidden="true"></div>';
@@ -442,7 +518,7 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                 +     '<span class="cna-entry-toggle" aria-hidden="true">&#9662;</span>'
                 +   '</button>'
                 +   '<div class="cna-entry-body" hidden>'
-                +     '<div class="cna-entry-content">' + (r.Body || '') + '</div>'
+                +     '<div class="cna-entry-content">' + (sanitizedBody || '') + '</div>'
                 +   '</div>'
                 + '</article>';
         }).join('');
