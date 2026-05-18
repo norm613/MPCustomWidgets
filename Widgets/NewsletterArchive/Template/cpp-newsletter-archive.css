@@ -58,6 +58,19 @@
 .cna .cna-sidebar-action[disabled] { opacity: 0.5; cursor: default; }
 .cna .cna-sidebar-action[disabled]:hover { background: #fff; }
 
+/* --- Drag-to-reorder visual states (HTML5 drag-and-drop) --- */
+.cna .cna-sidebar-item[draggable="true"] { cursor: grab; }
+.cna .cna-sidebar-item[draggable="true"]:active { cursor: grabbing; }
+.cna .cna-sidebar-item.cna-dragging { opacity: 0.4; }
+/* Vertical layout (desktop): drop indicator above / below */
+.cna .cna-sidebar-item.cna-drop-before { box-shadow: inset 0 3px 0 0 #4a6c9a; }
+.cna .cna-sidebar-item.cna-drop-after  { box-shadow: inset 0 -3px 0 0 #4a6c9a; }
+/* Horizontal layout (mobile pill row): drop indicator at leading / trailing edge */
+@media (max-width: 800px) {
+    .cna .cna-sidebar-item.cna-drop-before { box-shadow: inset 3px 0 0 0 #4a6c9a; }
+    .cna .cna-sidebar-item.cna-drop-after  { box-shadow: inset -3px 0 0 0 #4a6c9a; }
+}
+
 /* Mobile: sidebar becomes a horizontal pill row above the entries */
 @media (max-width: 800px) {
     .cna .cna-layout { flex-direction: column; gap: 0.5em; }

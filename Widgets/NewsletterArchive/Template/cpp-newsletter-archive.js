@@ -331,6 +331,7 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
     var GROUPING_DEFAULT = 'inbox';
     var HIDDEN_PUB_IDS_KEY = 'cna-hidden-pub-ids';
     var SIDEBAR_COLLAPSED_KEY = 'cna-sidebar-collapsed';
+    var PUB_SORT_ORDER_KEY = 'cna-pub-sort-order';
 
     function getViewMode() {
         try {
@@ -389,6 +390,49 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
 
     function setSidebarCollapsed(v) {
         try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, v ? '1' : '0'); } catch (e) { /* swallow */ }
+    }
+
+    // Manual sort-order override for the publications sidebar.
+    // Stored as a JSON array of Publication_ID numbers. The order is a SOFT
+    // override: Pubs in the array come first, in this order; any Pub not
+    // yet listed (e.g., new publications appearing later) appends at the
+    // end in its original derived order.
+    function getPubSortOrder() {
+        try {
+            var raw = localStorage.getItem(PUB_SORT_ORDER_KEY);
+            if (!raw) return [];
+            var arr = JSON.parse(raw);
+            if (!Array.isArray(arr)) return [];
+            return arr.map(function(n) { return parseInt(n, 10); }).filter(function(n) { return !isNaN(n); });
+        } catch (e) { return []; }
+    }
+
+    function setPubSortOrder(idArr) {
+        try { localStorage.setItem(PUB_SORT_ORDER_KEY, JSON.stringify(idArr || [])); } catch (e) { /* swallow */ }
+    }
+
+    function clearPubSortOrder() {
+        try { localStorage.removeItem(PUB_SORT_ORDER_KEY); } catch (e) { /* swallow */ }
+    }
+
+    // Apply the manual sort to a list of {id, title, count} pubs.
+    // Pubs listed in the manual order come first; unlisted pubs follow in
+    // their original (derived) sequence.
+    function applyPubSortOrder(pubs) {
+        var manual = getPubSortOrder();
+        if (!manual.length) return pubs;
+        var byId = {};
+        pubs.forEach(function(p) { byId[String(p.id)] = p; });
+        var ordered = [];
+        var seen = {};
+        manual.forEach(function(id) {
+            var p = byId[String(id)];
+            if (p) { ordered.push(p); seen[String(id)] = true; }
+        });
+        pubs.forEach(function(p) {
+            if (!seen[String(p.id)]) ordered.push(p);
+        });
+        return ordered;
     }
 
     // First non-space character of the title, uppercased — used as the
@@ -603,17 +647,21 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         var hiddenCount = pubs.filter(function(p) { return hidden[String(p.id)]; }).length;
         var allVisible = hiddenCount === 0;
         var allHidden  = hiddenCount === totalPubs && totalPubs > 0;
+        var hasManualOrder = getPubSortOrder().length > 0;
         var items = pubs.map(function(p) {
             var isHidden = !!hidden[String(p.id)];
             return ''
-                + '<button type="button" class="cna-sidebar-item" data-pub-id="' + escapeHtml(p.id) + '" data-hidden="' + (isHidden ? 'true' : 'false') + '" aria-pressed="' + (isHidden ? 'false' : 'true') + '" title="' + escapeHtml(p.title) + (isHidden ? ' (hidden)' : '') + '">'
+                + '<button type="button" class="cna-sidebar-item" draggable="true" data-pub-id="' + escapeHtml(p.id) + '" data-hidden="' + (isHidden ? 'true' : 'false') + '" aria-pressed="' + (isHidden ? 'false' : 'true') + '" title="' + escapeHtml(p.title) + (isHidden ? ' (hidden)' : '') + ' — drag to reorder">'
                 +   '<span class="cna-sidebar-item-icon" aria-hidden="true">' + escapeHtml(pubInitial(p.title)) + '</span>'
                 +   '<span class="cna-sidebar-item-label">' + escapeHtml(p.title) + '</span>'
                 +   '<span class="cna-sidebar-item-count">' + p.count + '</span>'
                 + '</button>';
         }).join('');
-        var collapseLabel = collapsed ? '»' : '«'; // » / «
+        var collapseLabel = collapsed ? '»' : '«';
         var collapseAria  = collapsed ? 'Expand publication panel' : 'Collapse publication panel';
+        var resetBtn = hasManualOrder
+            ? '<button type="button" class="cna-sidebar-action" data-sidebar-reset-order title="Restore default ordering">Reset order</button>'
+            : '';
         return ''
             + '<aside class="cna-sidebar" data-collapsed="' + (collapsed ? 'true' : 'false') + '" aria-label="Publication filter">'
             +   '<div class="cna-sidebar-header">'
@@ -624,6 +672,7 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
             +   '<div class="cna-sidebar-actions">'
             +     '<button type="button" class="cna-sidebar-action" data-sidebar-show-all' + (allVisible ? ' disabled' : '') + '>Show all</button>'
             +     '<button type="button" class="cna-sidebar-action" data-sidebar-hide-all' + (allHidden ? ' disabled' : '') + '>Hide all</button>'
+            +     resetBtn
             +   '</div>'
             + '</aside>';
     }
@@ -646,9 +695,11 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         var sidebarCollapsed = getSidebarCollapsed();
 
         // Sidebar reflects the FULL pub list (regardless of hide state) so the
-        // user can always toggle anything back on. Entries are filtered by the
+        // user can always toggle anything back on. The manual sort order, if
+        // set, reorders the pubs here — this same order also drives By-
+        // Publication group ordering downstream. Entries are filtered by the
         // hidden set BEFORE grouping, so all combinations compose cleanly.
-        var pubs = derivePublications(rows);
+        var pubs = applyPubSortOrder(derivePublications(rows));
         var visibleRows = rows.filter(function(r) { return !hidden[String(r.Publication_ID)]; });
 
         var entriesHtml;
@@ -659,21 +710,22 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                 +   '<p>Click any publication in the panel to show its entries, or use <em>Show all</em>.</p>'
                 + '</div>';
         } else if (grouping === 'publication') {
-            // SP returns rows date-desc overall, so within any Publication group
-            // the first row encountered is that group's newest, and group order
-            // is naturally newest-pub-first.
+            // Group rows by Publication_ID; rows within each group remain in the
+            // SP's date-desc order. Group section order follows `pubs` — which
+            // is the manual sort order if set, else newest-pub-first derived.
+            // Pubs without visible rows (all filtered out) are skipped.
             var groups = {};
-            var groupOrder = [];
             visibleRows.forEach(function(r) {
                 var key = String(r.Publication_ID || '0');
                 if (!groups[key]) {
                     groups[key] = { title: r.Publication_Title || '(Untitled)', rows: [] };
-                    groupOrder.push(key);
                 }
                 groups[key].rows.push(r);
             });
-            entriesHtml = groupOrder.map(function(key) {
+            entriesHtml = pubs.map(function(p) {
+                var key = String(p.id);
                 var g = groups[key];
+                if (!g) return '';
                 return ''
                     + '<section class="cna-pub-group">'
                     +   '<h3 class="cna-pub-group-title">'
@@ -805,6 +857,119 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                 setHiddenPubIds(all);
                 logEngagement('newsletter-pub-filter', 'hide-all', '');
                 renderEntries(rows);
+            });
+        }
+
+        // Reset-order action — clears the manual sort, falling back to the
+        // derived (newest-pub-first) order. Only present when a manual
+        // order is set; renderSidebarHtml omits the button otherwise.
+        var resetOrderBtn = root.querySelector('[data-sidebar-reset-order]');
+        if (resetOrderBtn) {
+            resetOrderBtn.addEventListener('click', function() {
+                clearPubSortOrder();
+                logEngagement('newsletter-pub-sort', 'reset', '');
+                renderEntries(rows);
+            });
+        }
+
+        // Drag-and-drop reorder — HTML5 drag-and-drop on the sidebar list.
+        // dragstart marks the source; dragover on a sibling computes whether to
+        // drop BEFORE or AFTER (based on cursor position relative to the
+        // target's midline along whichever axis the layout uses); drop commits
+        // a new order to localStorage and re-renders. Pure native DnD — works
+        // on desktop instantly and on iOS/Android with long-press.
+        var sidebarList = root.querySelector('.cna-sidebar-list');
+        if (sidebarList) {
+            var dragState = { srcId: null, srcEl: null };
+
+            function clearDropIndicators() {
+                sidebarList.querySelectorAll('.cna-drop-before, .cna-drop-after').forEach(function(el) {
+                    el.classList.remove('cna-drop-before', 'cna-drop-after');
+                });
+            }
+
+            // Compute whether the cursor sits in the "before" or "after" half
+            // of the target item, automatically picking the layout axis: if
+            // the item is wider than tall it's the horizontal mobile pill row
+            // (use clientX); otherwise the vertical desktop rail (clientY).
+            function computeDropSide(targetEl, clientX, clientY) {
+                var rect = targetEl.getBoundingClientRect();
+                var horizontal = rect.width > rect.height;
+                if (horizontal) {
+                    return (clientX - rect.left) < (rect.width / 2) ? 'before' : 'after';
+                }
+                return (clientY - rect.top) < (rect.height / 2) ? 'before' : 'after';
+            }
+
+            sidebarList.querySelectorAll('.cna-sidebar-item').forEach(function(item) {
+                item.addEventListener('dragstart', function(e) {
+                    dragState.srcId = item.getAttribute('data-pub-id');
+                    dragState.srcEl = item;
+                    item.classList.add('cna-dragging');
+                    try {
+                        e.dataTransfer.effectAllowed = 'move';
+                        // Some browsers (Firefox) require dataTransfer.setData
+                        // to be called or the drag won't initiate.
+                        e.dataTransfer.setData('text/plain', dragState.srcId || '');
+                    } catch (err) { /* swallow */ }
+                });
+
+                item.addEventListener('dragend', function() {
+                    item.classList.remove('cna-dragging');
+                    clearDropIndicators();
+                    dragState.srcId = null;
+                    dragState.srcEl = null;
+                });
+
+                item.addEventListener('dragover', function(e) {
+                    if (!dragState.srcId) return;
+                    if (item === dragState.srcEl) return;
+                    e.preventDefault();
+                    try { e.dataTransfer.dropEffect = 'move'; } catch (err) {}
+                    var side = computeDropSide(item, e.clientX, e.clientY);
+                    clearDropIndicators();
+                    item.classList.add(side === 'before' ? 'cna-drop-before' : 'cna-drop-after');
+                });
+
+                item.addEventListener('dragleave', function() {
+                    item.classList.remove('cna-drop-before', 'cna-drop-after');
+                });
+
+                item.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    if (!dragState.srcId) return;
+                    var targetId = item.getAttribute('data-pub-id');
+                    if (!targetId || targetId === dragState.srcId) {
+                        clearDropIndicators();
+                        return;
+                    }
+                    var side = computeDropSide(item, e.clientX, e.clientY);
+                    // Build the new order from the CURRENT pub list (which is
+                    // already in the active sort order — manual or derived).
+                    // Remove the source, then insert it before/after the target.
+                    var newOrder = [];
+                    pubs.forEach(function(p) {
+                        var pid = String(p.id);
+                        if (pid === dragState.srcId) return; // skip source
+                        if (pid === targetId) {
+                            if (side === 'before') {
+                                newOrder.push(parseInt(dragState.srcId, 10));
+                                newOrder.push(p.id);
+                            } else {
+                                newOrder.push(p.id);
+                                newOrder.push(parseInt(dragState.srcId, 10));
+                            }
+                            return;
+                        }
+                        newOrder.push(p.id);
+                    });
+                    setPubSortOrder(newOrder);
+                    clearDropIndicators();
+                    logEngagement('newsletter-pub-sort', 'reorder', dragState.srcId + '->' + targetId + ':' + side);
+                    dragState.srcId = null;
+                    dragState.srcEl = null;
+                    renderEntries(rows);
+                });
             });
         }
 
