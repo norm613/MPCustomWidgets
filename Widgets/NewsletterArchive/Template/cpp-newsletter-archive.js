@@ -674,6 +674,12 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
             +     '<button type="button" class="cna-sidebar-action" data-sidebar-hide-all' + (allHidden ? ' disabled' : '') + '>Hide all</button>'
             +     resetBtn
             +   '</div>'
+            +   '<div class="cna-sidebar-footer">'
+            +     '<button type="button" class="cna-sidebar-footer-btn" data-sidebar-collapse-all title="Collapse all expanded messages" aria-label="Collapse all expanded messages">'
+            +       '<span class="cna-sidebar-footer-btn-icon" aria-hidden="true">&#8613;</span>'
+            +       '<span class="cna-sidebar-footer-btn-label">Collapse all messages</span>'
+            +     '</button>'
+            +   '</div>'
             + '</aside>';
     }
 
@@ -869,6 +875,22 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                 clearPubSortOrder();
                 logEngagement('newsletter-pub-sort', 'reset', '');
                 renderEntries(rows);
+            });
+        }
+
+        // Collapse-all-messages action — closes every currently-expanded entry.
+        // Acts directly on the DOM (no re-render) so the user's scroll position
+        // is preserved; the expanded state is purely a per-entry data-attribute.
+        var collapseAllBtn = root.querySelector('[data-sidebar-collapse-all]');
+        if (collapseAllBtn) {
+            collapseAllBtn.addEventListener('click', function() {
+                var expanded = root.querySelectorAll('.cna-entry[data-expanded]');
+                expanded.forEach(function(entry) {
+                    entry.removeAttribute('data-expanded');
+                    var body = entry.querySelector('.cna-entry-body');
+                    if (body) body.hidden = true;
+                });
+                logEngagement('newsletter-collapse-all', '', String(expanded.length));
             });
         }
 

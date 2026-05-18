@@ -31,14 +31,19 @@
 .cna .cna-main { flex-grow: 1; min-width: 0; }
 
 /* --- Sidebar (publication filter panel) --------------------------------- */
-.cna .cna-sidebar { width: 240px; flex-shrink: 0; background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px; padding: 0; transition: width 0.18s ease; overflow: hidden; }
+/* On desktop the sidebar is position:sticky so it stays pinned to the top of
+   the viewport while the user scrolls through entries. The inner list scrolls
+   internally if more publications than viewport-height can hold. The footer
+   ("Collapse all messages") therefore stays visible at the bottom of the
+   viewable rail regardless of how far the page has scrolled. */
+.cna .cna-sidebar { width: 240px; flex-shrink: 0; background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px; padding: 0; transition: width 0.18s ease; overflow: hidden; position: sticky; top: 1em; max-height: calc(100vh - 2em); display: flex; flex-direction: column; }
 .cna .cna-sidebar[data-collapsed="true"] { width: 56px; }
-.cna .cna-sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 0.55em 0.75em 0.55em 0.875em; border-bottom: 1px solid #e8e8e8; }
+.cna .cna-sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 0.55em 0.75em 0.55em 0.875em; border-bottom: 1px solid #e8e8e8; flex-shrink: 0; }
 .cna .cna-sidebar-title { font-size: 0.85rem; font-weight: 600; color: #555; margin: 0; text-transform: uppercase; letter-spacing: 0.03em; }
 .cna .cna-sidebar[data-collapsed="true"] .cna-sidebar-title { display: none; }
 .cna .cna-sidebar-collapse { background: transparent; border: 0; color: #666; cursor: pointer; padding: 0.25em 0.45em; font-size: 1rem; border-radius: 4px; line-height: 1; }
 .cna .cna-sidebar-collapse:hover { background: #ececec; }
-.cna .cna-sidebar-list { list-style: none; padding: 0.4em 0; margin: 0; }
+.cna .cna-sidebar-list { list-style: none; padding: 0.4em 0; margin: 0; flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 .cna .cna-sidebar-item { display: flex; align-items: center; gap: 0.55em; padding: 0.45em 0.875em; cursor: pointer; user-select: none; border-left: 3px solid transparent; transition: background 0.12s ease, opacity 0.12s ease; background: transparent; border-top: 0; border-right: 0; border-bottom: 0; width: 100%; text-align: left; font: inherit; color: inherit; }
 .cna .cna-sidebar-item:hover { background: #f0f4fa; }
 .cna .cna-sidebar-item:focus-visible { outline: 2px solid #4a6c9a; outline-offset: -2px; }
@@ -51,12 +56,21 @@
 .cna .cna-sidebar[data-collapsed="true"] .cna-sidebar-item-label,
 .cna .cna-sidebar[data-collapsed="true"] .cna-sidebar-item-count { display: none; }
 .cna .cna-sidebar[data-collapsed="true"] .cna-sidebar-item { justify-content: center; padding: 0.45em 0.25em; }
-.cna .cna-sidebar-actions { padding: 0.5em 0.625em; border-top: 1px solid #e8e8e8; display: flex; gap: 0.4em; }
+.cna .cna-sidebar-actions { padding: 0.5em 0.625em; border-top: 1px solid #e8e8e8; display: flex; gap: 0.4em; flex-shrink: 0; flex-wrap: wrap; }
 .cna .cna-sidebar[data-collapsed="true"] .cna-sidebar-actions { display: none; }
 .cna .cna-sidebar-action { flex-grow: 1; background: #fff; color: #4a6c9a; border: 1px solid #d0d0d0; padding: 0.35em 0.5em; font: inherit; font-size: 0.78rem; cursor: pointer; border-radius: 4px; transition: background 0.12s ease; }
 .cna .cna-sidebar-action:hover { background: #f0f4fa; }
 .cna .cna-sidebar-action[disabled] { opacity: 0.5; cursor: default; }
 .cna .cna-sidebar-action[disabled]:hover { background: #fff; }
+
+/* --- Sidebar footer (actions on main-content state, not sidebar state) --- */
+.cna .cna-sidebar-footer { padding: 0.5em 0.625em; border-top: 1px solid #e8e8e8; flex-shrink: 0; }
+.cna .cna-sidebar-footer-btn { display: flex; align-items: center; justify-content: center; gap: 0.5em; width: 100%; background: #fff; color: #4a6c9a; border: 1px solid #d0d0d0; padding: 0.5em 0.65em; font: inherit; font-size: 0.85rem; cursor: pointer; border-radius: 4px; transition: background 0.12s ease; }
+.cna .cna-sidebar-footer-btn:hover { background: #f0f4fa; }
+.cna .cna-sidebar-footer-btn-icon { font-size: 0.95rem; line-height: 1; }
+.cna .cna-sidebar[data-collapsed="true"] .cna-sidebar-footer { padding: 0.5em 0.35em; }
+.cna .cna-sidebar[data-collapsed="true"] .cna-sidebar-footer-btn-label { display: none; }
+.cna .cna-sidebar[data-collapsed="true"] .cna-sidebar-footer-btn { padding: 0.5em 0.25em; }
 
 /* --- Drag-to-reorder visual states (HTML5 drag-and-drop) --- */
 .cna .cna-sidebar-item[draggable="true"] { cursor: grab; }
@@ -71,19 +85,24 @@
     .cna .cna-sidebar-item.cna-drop-after  { box-shadow: inset -3px 0 0 0 #4a6c9a; }
 }
 
-/* Mobile: sidebar becomes a horizontal pill row above the entries */
+/* Mobile: sidebar becomes a horizontal pill row above the entries.
+   Sticky / flex-column behavior is dropped — the rail sits inline at the
+   top of the content area and scrolls with the page. The footer collapse-
+   all button is still present below the actions row. */
 @media (max-width: 800px) {
     .cna .cna-layout { flex-direction: column; gap: 0.5em; }
-    .cna .cna-sidebar { width: 100% !important; }
+    .cna .cna-sidebar { width: 100% !important; position: static; max-height: none; display: block; }
     .cna .cna-sidebar-header { padding: 0.45em 0.75em; }
     .cna .cna-sidebar-collapse { display: none; }
-    .cna .cna-sidebar-list { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 0.4em; overflow-x: auto; overflow-y: hidden; padding: 0.4em 0.5em; -webkit-overflow-scrolling: touch; }
+    .cna .cna-sidebar-list { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 0.4em; overflow-x: auto; overflow-y: hidden; padding: 0.4em 0.5em; -webkit-overflow-scrolling: touch; flex: initial; min-height: initial; }
     .cna .cna-sidebar-item { flex-shrink: 0; flex-direction: column; gap: 0.2em; border-left: 0; border-bottom: 3px solid transparent; padding: 0.45em 0.55em; min-width: 70px; max-width: 110px; align-items: center; }
     .cna .cna-sidebar-item[data-hidden="false"] { border-bottom-color: #4a6c9a; }
     .cna .cna-sidebar-item-label { font-size: 0.78rem; white-space: nowrap; max-width: 100%; }
     .cna .cna-sidebar-item-count { font-size: 0.7rem; }
     .cna .cna-sidebar-actions { padding: 0.4em 0.5em; }
     .cna .cna-sidebar-action { font-size: 0.75rem; }
+    .cna .cna-sidebar-footer { padding: 0.4em 0.5em; }
+    .cna .cna-sidebar-footer-btn { font-size: 0.8rem; }
 }
 
 /* --- Entries container --- */
