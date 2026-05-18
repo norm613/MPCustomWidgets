@@ -93,6 +93,20 @@ Drop-indicator visuals adapt to layout: a colored bar on the top/bottom
 edge in desktop sidebar mode, on the leading/trailing edge in mobile
 horizontal-pill mode.
 
+**Sticky behavior.** On desktop the sidebar is `position: sticky` — pinned
+to the top of the viewport with a height cap so it stays in view as you
+scroll through entries. The publications list scrolls internally if the
+list outgrows the viewport. This keeps the actions row and the **Collapse
+all messages** footer button always visible at the bottom of the rail.
+On mobile (< 800px) the sticky behavior is dropped and the sidebar
+returns to inline flow at the top of the content area.
+
+**Collapse all messages.** A dedicated footer button below the actions
+row closes every currently-expanded entry in the main listing. Acts
+directly on the DOM (no re-render) so scroll position is preserved. In
+collapsed-rail mode the button shrinks to its icon (↥); in mobile pill-
+row mode the button remains visible in the actions area.
+
 On screens narrower than 800px the sidebar reflows to a horizontal
 scrolling pill row above the toolbar — no off-canvas drawer.
 
@@ -347,6 +361,7 @@ The widget fires these `api_Custom_LogClick` events:
 | `newsletter-pub-filter` | User shows / hides a publication in the sidebar (label = `show` / `hide` / `show-all` / `hide-all`; target = Publication_ID for per-item events) |
 | `newsletter-pub-sort` | User reorders the sidebar (label = `reorder`, target = `<srcId>-><tgtId>:before\|after`) or resets it (label = `reset`) |
 | `newsletter-sidebar-collapse` | User toggles the sidebar to collapsed / expanded |
+| `newsletter-collapse-all` | User clicks "Collapse all messages" (target = number of entries that were expanded at click time) |
 
 Each event records page URL, page title, target identifier, session ID,
 user agent, and referrer.
