@@ -319,14 +319,18 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
     }
 
     // --- User preference persistence -----------------------------------
-    // Two orthogonal dimensions:
-    //   view-mode: 'compact' | 'expanded'    — display density per entry
-    //   grouping : 'inbox'   | 'publication' — flat list vs grouped by Pub
-    // Each persists independently in localStorage; user can combine freely.
+    // Independent dimensions, each persisted to localStorage:
+    //   view-mode        : 'compact' | 'expanded'    — entry display density
+    //   grouping         : 'inbox'   | 'publication' — flat list vs grouped
+    //   hidden-pub-ids   : []                        — Pub IDs filtered out
+    //   sidebar-collapsed: bool                      — sidebar width state
+    // The user can combine any combination freely.
     var VIEW_MODE_KEY = 'cna-view-mode';
     var VIEW_MODE_DEFAULT = 'compact';
     var GROUPING_KEY = 'cna-grouping';
     var GROUPING_DEFAULT = 'inbox';
+    var HIDDEN_PUB_IDS_KEY = 'cna-hidden-pub-ids';
+    var SIDEBAR_COLLAPSED_KEY = 'cna-sidebar-collapsed';
 
     function getViewMode() {
         try {
@@ -348,6 +352,52 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
 
     function setGrouping(g) {
         try { localStorage.setItem(GROUPING_KEY, g); } catch (e) { /* swallow */ }
+    }
+
+    // Returns a {pubIdString: true} map of Publication_IDs the user has hidden.
+    // Stored as a JSON array of integers; only HIDDEN ids are tracked, so any
+    // new publication that appears in the dataset is visible by default.
+    function getHiddenPubIds() {
+        try {
+            var raw = localStorage.getItem(HIDDEN_PUB_IDS_KEY);
+            if (!raw) return {};
+            var arr = JSON.parse(raw);
+            if (!Array.isArray(arr)) return {};
+            var set = {};
+            arr.forEach(function(id) {
+                var n = parseInt(id, 10);
+                if (!isNaN(n)) set[String(n)] = true;
+            });
+            return set;
+        } catch (e) { return {}; }
+    }
+
+    function setHiddenPubIds(set) {
+        try {
+            var ids = Object.keys(set || {})
+                .map(function(k) { return parseInt(k, 10); })
+                .filter(function(n) { return !isNaN(n); });
+            localStorage.setItem(HIDDEN_PUB_IDS_KEY, JSON.stringify(ids));
+        } catch (e) { /* swallow */ }
+    }
+
+    function getSidebarCollapsed() {
+        try {
+            return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+        } catch (e) { return false; }
+    }
+
+    function setSidebarCollapsed(v) {
+        try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, v ? '1' : '0'); } catch (e) { /* swallow */ }
+    }
+
+    // First non-space character of the title, uppercased — used as the
+    // collapsed-mode avatar inside the sidebar circle. Pubs lack stock
+    // icons; first-letter avatars are the natural analog.
+    function pubInitial(title) {
+        if (!title) return '?';
+        var m = String(title).trim().match(/[A-Za-z0-9]/);
+        return m ? m[0].toUpperCase() : '?';
     }
 
     // --- Expanded-view extraction --------------------------------------
@@ -530,6 +580,54 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
             + '</article>';
     }
 
+    // Derive the unique-publications list from a raw row set. Order matches
+    // the SP's overall date-desc ordering (newest Pub first by its most-recent
+    // entry). Each entry: {id: Number, title: String, count: Number}.
+    function derivePublications(rows) {
+        var seen = {};
+        var pubs = [];
+        rows.forEach(function(r) {
+            var id = r.Publication_ID;
+            var key = String(id || '0');
+            if (!seen[key]) {
+                seen[key] = { id: id, title: r.Publication_Title || '(Untitled)', count: 0 };
+                pubs.push(seen[key]);
+            }
+            seen[key].count++;
+        });
+        return pubs;
+    }
+
+    function renderSidebarHtml(pubs, hidden, collapsed) {
+        var totalPubs = pubs.length;
+        var hiddenCount = pubs.filter(function(p) { return hidden[String(p.id)]; }).length;
+        var allVisible = hiddenCount === 0;
+        var allHidden  = hiddenCount === totalPubs && totalPubs > 0;
+        var items = pubs.map(function(p) {
+            var isHidden = !!hidden[String(p.id)];
+            return ''
+                + '<button type="button" class="cna-sidebar-item" data-pub-id="' + escapeHtml(p.id) + '" data-hidden="' + (isHidden ? 'true' : 'false') + '" aria-pressed="' + (isHidden ? 'false' : 'true') + '" title="' + escapeHtml(p.title) + (isHidden ? ' (hidden)' : '') + '">'
+                +   '<span class="cna-sidebar-item-icon" aria-hidden="true">' + escapeHtml(pubInitial(p.title)) + '</span>'
+                +   '<span class="cna-sidebar-item-label">' + escapeHtml(p.title) + '</span>'
+                +   '<span class="cna-sidebar-item-count">' + p.count + '</span>'
+                + '</button>';
+        }).join('');
+        var collapseLabel = collapsed ? '»' : '«'; // » / «
+        var collapseAria  = collapsed ? 'Expand publication panel' : 'Collapse publication panel';
+        return ''
+            + '<aside class="cna-sidebar" data-collapsed="' + (collapsed ? 'true' : 'false') + '" aria-label="Publication filter">'
+            +   '<div class="cna-sidebar-header">'
+            +     '<h2 class="cna-sidebar-title">Publications</h2>'
+            +     '<button type="button" class="cna-sidebar-collapse" data-sidebar-collapse aria-label="' + collapseAria + '" title="' + collapseAria + '">' + collapseLabel + '</button>'
+            +   '</div>'
+            +   '<div class="cna-sidebar-list" role="list">' + items + '</div>'
+            +   '<div class="cna-sidebar-actions">'
+            +     '<button type="button" class="cna-sidebar-action" data-sidebar-show-all' + (allVisible ? ' disabled' : '') + '>Show all</button>'
+            +     '<button type="button" class="cna-sidebar-action" data-sidebar-hide-all' + (allHidden ? ' disabled' : '') + '>Hide all</button>'
+            +   '</div>'
+            + '</aside>';
+    }
+
     function renderEntries(rows) {
         var root = document.getElementById('cna-root');
         if (!root) return;
@@ -544,16 +642,29 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         }
         var mode = getViewMode();
         var grouping = getGrouping();
+        var hidden = getHiddenPubIds();
+        var sidebarCollapsed = getSidebarCollapsed();
 
-        // Build entry markup. SP returns rows ordered by Sent_Date DESC overall,
-        // so flat-inbox order is already correct, and within any Publication group
-        // the first row encountered is that group's newest (so groupOrder also
-        // happens to be newest-pub-first naturally).
-        var items;
-        if (grouping === 'publication') {
+        // Sidebar reflects the FULL pub list (regardless of hide state) so the
+        // user can always toggle anything back on. Entries are filtered by the
+        // hidden set BEFORE grouping, so all combinations compose cleanly.
+        var pubs = derivePublications(rows);
+        var visibleRows = rows.filter(function(r) { return !hidden[String(r.Publication_ID)]; });
+
+        var entriesHtml;
+        if (visibleRows.length === 0) {
+            entriesHtml = ''
+                + '<div class="cna-empty-state">'
+                +   '<p><strong>All publications are hidden.</strong></p>'
+                +   '<p>Click any publication in the panel to show its entries, or use <em>Show all</em>.</p>'
+                + '</div>';
+        } else if (grouping === 'publication') {
+            // SP returns rows date-desc overall, so within any Publication group
+            // the first row encountered is that group's newest, and group order
+            // is naturally newest-pub-first.
             var groups = {};
             var groupOrder = [];
-            rows.forEach(function(r) {
+            visibleRows.forEach(function(r) {
                 var key = String(r.Publication_ID || '0');
                 if (!groups[key]) {
                     groups[key] = { title: r.Publication_Title || '(Untitled)', rows: [] };
@@ -561,7 +672,7 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                 }
                 groups[key].rows.push(r);
             });
-            items = groupOrder.map(function(key) {
+            entriesHtml = groupOrder.map(function(key) {
                 var g = groups[key];
                 return ''
                     + '<section class="cna-pub-group">'
@@ -573,24 +684,36 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                     + '</section>';
             }).join('');
         } else {
-            items = rows.map(renderEntryHtml).join('');
+            entriesHtml = visibleRows.map(renderEntryHtml).join('');
+        }
+
+        var summaryText;
+        if (visibleRows.length === rows.length) {
+            summaryText = rows.length + ' archived item' + (rows.length === 1 ? '' : 's') + ' available &mdash; click any to expand.';
+        } else {
+            summaryText = 'Showing ' + visibleRows.length + ' of ' + rows.length + ' (filtered) &mdash; click any to expand.';
         }
 
         root.innerHTML =
-            '<div class="cna-toolbar">'
-            +   '<p class="cna-summary">' + rows.length + ' archived item' + (rows.length === 1 ? '' : 's') + ' available &mdash; click any to expand.</p>'
-            +   '<div class="cna-toolbar-toggles">'
-            +     '<div class="cna-view-toggle" role="group" aria-label="Grouping">'
-            +       '<button type="button" class="cna-view-btn" data-grouping="inbox" aria-pressed="' + (grouping === 'inbox' ? 'true' : 'false') + '">Inbox</button>'
-            +       '<button type="button" class="cna-view-btn" data-grouping="publication" aria-pressed="' + (grouping === 'publication' ? 'true' : 'false') + '">By Publication</button>'
+            '<div class="cna-layout">'
+            +   renderSidebarHtml(pubs, hidden, sidebarCollapsed)
+            +   '<div class="cna-main">'
+            +     '<div class="cna-toolbar">'
+            +       '<p class="cna-summary">' + summaryText + '</p>'
+            +       '<div class="cna-toolbar-toggles">'
+            +         '<div class="cna-view-toggle" role="group" aria-label="Grouping">'
+            +           '<button type="button" class="cna-view-btn" data-grouping="inbox" aria-pressed="' + (grouping === 'inbox' ? 'true' : 'false') + '">Inbox</button>'
+            +           '<button type="button" class="cna-view-btn" data-grouping="publication" aria-pressed="' + (grouping === 'publication' ? 'true' : 'false') + '">By Publication</button>'
+            +         '</div>'
+            +         '<div class="cna-view-toggle" role="group" aria-label="Display density">'
+            +           '<button type="button" class="cna-view-btn" data-view-mode="compact" aria-pressed="' + (mode === 'compact' ? 'true' : 'false') + '">Compact</button>'
+            +           '<button type="button" class="cna-view-btn" data-view-mode="expanded" aria-pressed="' + (mode === 'expanded' ? 'true' : 'false') + '">Expanded</button>'
+            +         '</div>'
+            +       '</div>'
             +     '</div>'
-            +     '<div class="cna-view-toggle" role="group" aria-label="Display density">'
-            +       '<button type="button" class="cna-view-btn" data-view-mode="compact" aria-pressed="' + (mode === 'compact' ? 'true' : 'false') + '">Compact</button>'
-            +       '<button type="button" class="cna-view-btn" data-view-mode="expanded" aria-pressed="' + (mode === 'expanded' ? 'true' : 'false') + '">Expanded</button>'
-            +     '</div>'
+            +     '<div class="cna-entries" data-view-mode="' + mode + '" data-grouping="' + grouping + '">' + entriesHtml + '</div>'
             +   '</div>'
-            + '</div>'
-            + '<div class="cna-entries" data-view-mode="' + mode + '" data-grouping="' + grouping + '">' + items + '</div>';
+            + '</div>';
 
         // View-mode toggle handler — Compact / Expanded.
         // Density-only swap; CSS handles the change via [data-view-mode], no re-render.
@@ -622,6 +745,68 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                 renderEntries(rows);
             });
         });
+
+        // Sidebar item handler — toggle that Publication's visibility.
+        // Full re-render because the filter changes which entries render.
+        root.querySelectorAll('.cna-sidebar-item').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var pubId = btn.getAttribute('data-pub-id');
+                if (!pubId) return;
+                var current = getHiddenPubIds();
+                var nowHidden;
+                if (current[pubId]) {
+                    delete current[pubId];
+                    nowHidden = false;
+                } else {
+                    current[pubId] = true;
+                    nowHidden = true;
+                }
+                setHiddenPubIds(current);
+                logEngagement('newsletter-pub-filter', nowHidden ? 'hide' : 'show', pubId);
+                renderEntries(rows);
+            });
+        });
+
+        // Sidebar collapse toggle — visual only; CSS animates the width swap.
+        // No re-render needed; we just flip the data-collapsed attribute.
+        var collapseBtn = root.querySelector('[data-sidebar-collapse]');
+        if (collapseBtn) {
+            collapseBtn.addEventListener('click', function() {
+                var aside = root.querySelector('.cna-sidebar');
+                if (!aside) return;
+                var nowCollapsed = aside.getAttribute('data-collapsed') !== 'true';
+                aside.setAttribute('data-collapsed', nowCollapsed ? 'true' : 'false');
+                setSidebarCollapsed(nowCollapsed);
+                collapseBtn.textContent = nowCollapsed ? '»' : '«';
+                var label = nowCollapsed ? 'Expand publication panel' : 'Collapse publication panel';
+                collapseBtn.setAttribute('aria-label', label);
+                collapseBtn.setAttribute('title', label);
+                logEngagement('newsletter-sidebar-collapse', nowCollapsed ? 'collapsed' : 'expanded', '');
+            });
+        }
+
+        // Sidebar bulk actions — Show all (clear hidden) / Hide all (mark every
+        // currently-known Pub hidden). Both re-render.
+        var showAllBtn = root.querySelector('[data-sidebar-show-all]');
+        if (showAllBtn) {
+            showAllBtn.addEventListener('click', function() {
+                if (showAllBtn.hasAttribute('disabled')) return;
+                setHiddenPubIds({});
+                logEngagement('newsletter-pub-filter', 'show-all', '');
+                renderEntries(rows);
+            });
+        }
+        var hideAllBtn = root.querySelector('[data-sidebar-hide-all]');
+        if (hideAllBtn) {
+            hideAllBtn.addEventListener('click', function() {
+                if (hideAllBtn.hasAttribute('disabled')) return;
+                var all = {};
+                pubs.forEach(function(p) { all[String(p.id)] = true; });
+                setHiddenPubIds(all);
+                logEngagement('newsletter-pub-filter', 'hide-all', '');
+                renderEntries(rows);
+            });
+        }
 
         // Expand-toggle handler
         root.querySelectorAll('[data-toggle]').forEach(function(btn) {
