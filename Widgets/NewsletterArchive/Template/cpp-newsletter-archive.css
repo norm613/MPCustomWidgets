@@ -42,8 +42,13 @@
 .cna .cna-entry-content table { max-width: 100%; }
 
 /* --- Expanded view overrides — show thumb + preview, 3-column header --- */
-.cna .cna-entries[data-view-mode="expanded"] .cna-entry-header { grid-template-columns: 96px 1fr auto; align-items: start; gap: 0.25em 1.1em; }
-.cna .cna-entries[data-view-mode="expanded"] .cna-entry-thumb { display: block; grid-column: 1; align-self: start; width: 96px; height: 96px; object-fit: cover; border-radius: 4px; background: #f0f0f0; }
+/* Thumb dimensions follow MP's canonical widget image ratio of 59:32 (≈1.84:1) —
+   matches event finder / opportunity finder / group finder / mission trip finder.
+   MP's intrinsic source is 800×433 px, rendered at 295×160; we use 148×80 (half).
+   Also compatible with Facebook OG (1.91:1) and LinkedIn shared (1.91:1) — the
+   ~3% ratio difference is absorbed by object-fit: cover with center focus. */
+.cna .cna-entries[data-view-mode="expanded"] .cna-entry-header { grid-template-columns: 148px 1fr auto; align-items: start; gap: 0.25em 1.1em; }
+.cna .cna-entries[data-view-mode="expanded"] .cna-entry-thumb { display: block; grid-column: 1; align-self: start; width: 148px; height: 80px; object-fit: cover; object-position: center; border-radius: 4px; background: #f0f0f0; }
 .cna .cna-entries[data-view-mode="expanded"] .cna-entry-thumb-placeholder { border: 1px dashed #ddd; background: linear-gradient(135deg, #fafafa 0%, #f0f0f0 100%); }
 .cna .cna-entries[data-view-mode="expanded"] .cna-entry-headline-wrap { grid-column: 2; gap: 0.3em; }
 .cna .cna-entries[data-view-mode="expanded"] .cna-entry-preview { display: block; color: #555; font-size: 0.9rem; line-height: 1.45; }
@@ -52,8 +57,9 @@
 @media (max-width: 600px) {
     .cna .cna-entry-header { padding: 0.875em 1em; }
     .cna .cna-entry-body { padding: 0 1em 1em 1em; }
-    .cna .cna-entries[data-view-mode="expanded"] .cna-entry-header { grid-template-columns: 64px 1fr auto; gap: 0.25em 0.85em; }
-    .cna .cna-entries[data-view-mode="expanded"] .cna-entry-thumb { width: 64px; height: 64px; }
+    /* Mobile thumb also 59:32, smaller — 96×52 keeps the same ratio */
+    .cna .cna-entries[data-view-mode="expanded"] .cna-entry-header { grid-template-columns: 96px 1fr auto; gap: 0.25em 0.85em; }
+    .cna .cna-entries[data-view-mode="expanded"] .cna-entry-thumb { width: 96px; height: 52px; }
     .cna .cna-toolbar { gap: 0.6em; }
     .cna .cna-summary { font-size: 0.875rem; }
 }
