@@ -55,6 +55,7 @@ number of publications in the result set).
 | Control | Values | localStorage key | Default |
 |---|---|---|---|
 | **Publication filter** | per-Pub show/hide | `cna-hidden-pub-ids` (JSON array) | all shown |
+| **Publication order** | drag-and-drop reorder | `cna-pub-sort-order` (JSON array of Pub IDs) | derived (newest-pub-first) |
 | **Sidebar width** | expanded / collapsed (icon-only) | `cna-sidebar-collapsed` (`0`/`1`) | expanded |
 | **Grouping** | Inbox / By Publication | `cna-grouping` | `inbox` |
 | **Display density** | Compact / Expanded | `cna-view-mode` | `compact` |
@@ -75,6 +76,22 @@ compose cleanly.
 
 The hidden set tracks only what's been explicitly hidden, so any new
 Publication that appears in the result set later is visible by default.
+
+**Drag-to-reorder.** Each sidebar item is draggable (native HTML5 DnD —
+desktop instantly; iOS/Android via long-press). Drop another publication
+before or after a target to set a manual sort order. The order persists
+in `cna-pub-sort-order` and drives both the sidebar list and the
+By Publication group section order.
+
+The order is a SOFT override: pubs you've reordered come first, in that
+order; pubs not yet in the manual array follow in their original derived
+order (so new publications appearing in a later SP result set append
+automatically). A "Reset order" button appears in the sidebar footer
+once a manual order exists; clicking it removes the override.
+
+Drop-indicator visuals adapt to layout: a colored bar on the top/bottom
+edge in desktop sidebar mode, on the leading/trailing edge in mobile
+horizontal-pill mode.
 
 On screens narrower than 800px the sidebar reflows to a horizontal
 scrolling pill row above the toolbar — no off-canvas drawer.
@@ -328,6 +345,7 @@ The widget fires these `api_Custom_LogClick` events:
 | `newsletter-view-mode-change` | User toggles Compact ↔ Expanded |
 | `newsletter-grouping-change` | User toggles Inbox ↔ By Publication |
 | `newsletter-pub-filter` | User shows / hides a publication in the sidebar (label = `show` / `hide` / `show-all` / `hide-all`; target = Publication_ID for per-item events) |
+| `newsletter-pub-sort` | User reorders the sidebar (label = `reorder`, target = `<srcId>-><tgtId>:before\|after`) or resets it (label = `reset`) |
 | `newsletter-sidebar-collapse` | User toggles the sidebar to collapsed / expanded |
 
 Each event records page URL, page title, target identifier, session ID,
