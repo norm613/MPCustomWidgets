@@ -49,9 +49,9 @@ GO
 -- transition: the SP's NEW filter (Omit_from_Archive = 0) should show
 -- MORE rows than the OLD filter (Active = 1).
 SELECT
-    Communication_Type_ID,
-    Active,
-    Omit_from_Archive,
+    c.Communication_Type_ID,
+    c.Active,
+    c.Omit_from_Archive,
     COUNT(*) AS Row_Count
 FROM dbo.dp_Communications c
 INNER JOIN dbo.dp_Communication_Types ct
