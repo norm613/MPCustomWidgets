@@ -435,6 +435,64 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         return ordered;
     }
 
+    // ====================================================================
+    // noReGreps — client-side search/filter across loaded archive rows.
+    // ----------------------------------------------------------------------
+    // Matches Subject + Publication_Title + extracted plaintext Body of
+    // each loaded row against the user's search term (case-insensitive
+    // substring). Body plaintext is lazy-cached per row on first match
+    // attempt to avoid re-parsing huge HTML strings on every keystroke.
+    // Term is ephemeral — not persisted to localStorage, since search
+    // intent is contextual and shouldn't survive a reload.
+    //
+    // Future Phase 2: a "Search older archives" button will POST to the
+    // SP with @Search populated for full-archive matching. This Phase 1
+    // module covers the common case (search the recent N loaded) with
+    // zero round-trip cost.
+    // ====================================================================
+    var noReGreps = {
+        term: '',                                                       // current search term (lowercased once at set-time)
+
+        // Strip HTML to lowercase plaintext for substring matching.
+        // Skips <script>/<style> contents; collapses whitespace.
+        plaintext: function(html) {
+            if (!html) return '';
+            try {
+                var doc = new DOMParser().parseFromString(html, 'text/html');
+                doc.querySelectorAll('script, style').forEach(function(n) { n.remove(); });
+                var t = (doc.body && doc.body.textContent) || '';
+                return t.toLowerCase().replace(/\s+/g, ' ');
+            } catch (e) {
+                return String(html).toLowerCase();
+            }
+        },
+
+        // Does a single row match the active search term?
+        matches: function(r) {
+            if (!this.term) return true;
+            var t = this.term;
+            if ((r.Subject || '').toLowerCase().indexOf(t) >= 0) return true;
+            if ((r.Publication_Title || '').toLowerCase().indexOf(t) >= 0) return true;
+            // Lazy-cache the plaintext body per row to amortize DOMParser cost.
+            if (!r._cnaSearchBody) {
+                r._cnaSearchBody = noReGreps.plaintext(r.Body);
+            }
+            if (r._cnaSearchBody.indexOf(t) >= 0) return true;
+            return false;
+        },
+
+        // Filter a row array by the active search term. Returns the input
+        // unchanged when term is empty.
+        filter: function(rows) {
+            if (!this.term) return rows;
+            return rows.filter(function(r) { return noReGreps.matches(r); });
+        },
+
+        setTerm: function(s) {
+            this.term = (s || '').toString().toLowerCase().trim();
+        }
+    };
+
     // First non-space character of the title, uppercased — used as the
     // sidebar avatar fallback when the Publication has no Image_Name set
     // (or as the always-rendered base layer beneath a FontAwesome icon).
@@ -768,12 +826,36 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         // user can always toggle anything back on. The manual sort order, if
         // set, reorders the pubs here — this same order also drives By-
         // Publication group ordering downstream. Entries are filtered by the
-        // hidden set BEFORE grouping, so all combinations compose cleanly.
+        // hidden set AND the noReGreps search term BEFORE grouping, so all
+        // combinations compose cleanly.
         var pubs = applyPubSortOrder(derivePublications(rows));
-        var visibleRows = rows.filter(function(r) { return !hidden[String(r.Publication_ID)]; });
+        var visibleRows = rows.filter(function(r) {
+            if (hidden[String(r.Publication_ID)]) return false;
+            return noReGreps.matches(r);
+        });
+
+        // When a search term is active, override the sidebar Pub counts to
+        // reflect search matches (per Pub, across the full row set so hidden
+        // Pubs still tell the user where matches exist). When search is
+        // empty, counts stay at total-per-Pub (the derivePublications default).
+        if (noReGreps.term) {
+            var byPubCount = {};
+            rows.forEach(function(r) {
+                if (!noReGreps.matches(r)) return;
+                var k = String(r.Publication_ID || '0');
+                byPubCount[k] = (byPubCount[k] || 0) + 1;
+            });
+            pubs.forEach(function(p) { p.count = byPubCount[String(p.id)] || 0; });
+        }
 
         var entriesHtml;
-        if (visibleRows.length === 0) {
+        if (visibleRows.length === 0 && noReGreps.term) {
+            entriesHtml = ''
+                + '<div class="cna-empty-state">'
+                +   '<p><strong>No matches for &ldquo;' + escapeHtml(noReGreps.term) + '&rdquo;.</strong></p>'
+                +   '<p>Try different terms, or clear the search to see all loaded entries.</p>'
+                + '</div>';
+        } else if (visibleRows.length === 0) {
             entriesHtml = ''
                 + '<div class="cna-empty-state">'
                 +   '<p><strong>All publications are hidden.</strong></p>'
@@ -810,16 +892,30 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         }
 
         var summaryText;
-        if (visibleRows.length === rows.length) {
+        if (noReGreps.term) {
+            summaryText = visibleRows.length + ' match' + (visibleRows.length === 1 ? '' : 'es') + ' for &ldquo;' + escapeHtml(noReGreps.term) + '&rdquo; in the loaded ' + rows.length + ' newsletters.';
+        } else if (visibleRows.length === rows.length) {
             summaryText = rows.length + ' archived item' + (rows.length === 1 ? '' : 's') + ' available &mdash; click any to expand.';
         } else {
             summaryText = 'Showing ' + visibleRows.length + ' of ' + rows.length + ' (filtered) &mdash; click any to expand.';
         }
 
+        // Search box (noReGreps): a single text input + clear button above the
+        // toolbar toggles. Persists `noReGreps.term` only in-memory; user re-
+        // types if they navigate away. data-cna-search-active reflects current
+        // state so CSS can show/hide the clear button.
+        var searchTermDisplay = escapeHtml(noReGreps.term);
+        var searchActive = noReGreps.term ? 'true' : 'false';
+
         root.innerHTML =
             '<div class="cna-layout">'
             +   renderSidebarHtml(pubs, hidden, sidebarCollapsed)
             +   '<div class="cna-main">'
+            +     '<div class="cna-search" data-cna-search-active="' + searchActive + '">'
+            +       '<i class="cna-search-icon fa fas fa-search" aria-hidden="true"></i>'
+            +       '<input type="search" class="cna-search-input" placeholder="Search subject, publication, or body text..." value="' + searchTermDisplay + '" autocomplete="off" spellcheck="false" aria-label="Search loaded newsletters">'
+            +       '<button type="button" class="cna-search-clear" aria-label="Clear search" title="Clear search">&times;</button>'
+            +     '</div>'
             +     '<div class="cna-toolbar">'
             +       '<p class="cna-summary">' + summaryText + '</p>'
             +       '<div class="cna-toolbar-toggles">'
@@ -955,6 +1051,66 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                     if (body) body.hidden = true;
                 });
                 logEngagement('newsletter-collapse-all', '', String(expanded.length));
+            });
+        }
+
+        // noReGreps search input — debounced 300ms; matches Subject +
+        // Publication_Title + plaintext body. Re-renders on each commit;
+        // focus + cursor position are preserved across the re-render so
+        // typing feels seamless. The Clear (x) button resets the term.
+        var searchInput  = root.querySelector('.cna-search-input');
+        var searchClear  = root.querySelector('.cna-search-clear');
+        var searchTimer  = null;
+
+        function applySearch(newTerm) {
+            var prev = noReGreps.term;
+            noReGreps.setTerm(newTerm);
+            if (noReGreps.term === prev) return;
+            // Preserve focus + selection across re-render. Read state before
+            // we blow away the DOM, then re-acquire and restore after.
+            var hadFocus  = searchInput && document.activeElement === searchInput;
+            var selStart  = searchInput ? searchInput.selectionStart : null;
+            var selEnd    = searchInput ? searchInput.selectionEnd   : null;
+            logEngagement('newsletter-search', noReGreps.term ? 'filter' : 'clear', noReGreps.term.substring(0, 100));
+            renderEntries(rows);
+            if (hadFocus) {
+                var fresh = root.querySelector('.cna-search-input');
+                if (fresh) {
+                    fresh.focus();
+                    try {
+                        if (selStart !== null && selEnd !== null) {
+                            fresh.setSelectionRange(selStart, selEnd);
+                        }
+                    } catch (e) { /* swallow — some input types reject setSelectionRange */ }
+                }
+            }
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('input', function() {
+                if (searchTimer) clearTimeout(searchTimer);
+                var val = searchInput.value;
+                searchTimer = setTimeout(function() { applySearch(val); }, 300);
+            });
+            // Enter commits immediately (no debounce wait)
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (searchTimer) clearTimeout(searchTimer);
+                    applySearch(searchInput.value);
+                } else if (e.key === 'Escape' && noReGreps.term) {
+                    e.preventDefault();
+                    if (searchTimer) clearTimeout(searchTimer);
+                    applySearch('');
+                }
+            });
+        }
+        if (searchClear) {
+            searchClear.addEventListener('click', function() {
+                if (searchTimer) clearTimeout(searchTimer);
+                if (searchInput) searchInput.value = '';
+                applySearch('');
+                if (searchInput) searchInput.focus();
             });
         }
 

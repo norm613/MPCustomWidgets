@@ -8,6 +8,17 @@
 .cna #auth-status.info    { background: #e7f3ff; border: 1px solid #91caff; }
 .cna .cna-loading, .cna .cna-empty-state, .cna .cna-error { text-align: center; padding: 3em 1em; color: #666; }
 .cna .cna-error { color: #991b1b; }
+/* --- Search input (noReGreps) — sits above the toolbar, full width --- */
+.cna .cna-search { display: flex; align-items: center; gap: 0.5em; position: relative; margin: 1em 0 0.5em 0; background: #fff; border: 1px solid #d0d0d0; border-radius: 6px; padding: 0.45em 0.75em; transition: border-color 0.12s ease, box-shadow 0.12s ease; }
+.cna .cna-search:focus-within { border-color: #4a6c9a; box-shadow: 0 0 0 3px rgba(74, 108, 154, 0.18); }
+.cna .cna-search-icon { color: #888; font-size: 0.95rem; flex-shrink: 0; }
+.cna .cna-search-input { flex-grow: 1; border: 0; outline: none; background: transparent; font: inherit; font-size: 0.95rem; color: #1a1a1a; padding: 0.15em 0; min-width: 0; }
+.cna .cna-search-input::placeholder { color: #999; }
+.cna .cna-search-input::-webkit-search-cancel-button { display: none; }     /* hide native clear; we render our own */
+.cna .cna-search-clear { background: transparent; border: 0; color: #888; cursor: pointer; padding: 0 0.4em; font-size: 1.15rem; line-height: 1; border-radius: 4px; transition: background 0.12s ease, color 0.12s ease; display: none; }
+.cna .cna-search-clear:hover { background: #ececec; color: #555; }
+.cna .cna-search[data-cna-search-active="true"] .cna-search-clear { display: inline-flex; align-items: center; justify-content: center; }
+
 /* --- Toolbar + two orthogonal toggles (Inbox/Publication × Compact/Expanded) --- */
 .cna .cna-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1em; flex-wrap: wrap; margin: 1.5em 0 0.75em 0; }
 .cna .cna-summary { color: #666; margin: 0; font-size: 0.95rem; }
