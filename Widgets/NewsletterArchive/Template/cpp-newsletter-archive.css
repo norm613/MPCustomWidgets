@@ -49,15 +49,22 @@
 .cna .cna-sidebar-item:focus-visible { outline: 2px solid #4a6c9a; outline-offset: -2px; }
 .cna .cna-sidebar-item[data-hidden="false"] { border-left-color: #4a6c9a; }
 .cna .cna-sidebar-item[data-hidden="true"] { opacity: 0.45; }
-/* Pub-identity avatar: small SQUARE (was circle). Always renders a first-letter
-   <span> behind a (lazy) <img> overlay. If the Pub has a Publication_Default_Image_URL,
-   the <img> covers the letter; if absent or load fails (onerror hides the img),
-   the letter shows through. Both layers fit a 26x26 square with 4px rounded corners. */
+/* Pub-identity avatar: small 26x26 square with 4px rounded corners. Dual-layer:
+   - .cna-sidebar-item-icon-letter (first-letter monogram) always renders as the
+     base layer.
+   - .cna-sidebar-item-icon-fa (FontAwesome icon overlay) is present only when
+     the Publication has Image_Name set in MP. When present, it covers the
+     letter underneath. Same colors, same dimensions.
+   The host page is expected to load FontAwesome (Enfold ships it by default on
+   the CPP-managed WordPress sites). Both `fa` and `fas` prefix classes are
+   emitted on the <i> tag so FA 4 (`fa-newspaper-o`) and FA 5+ (`fa-newspaper`)
+   icon names both render. */
 .cna .cna-sidebar-item-icon { width: 26px; height: 26px; flex-shrink: 0; background: #4a6c9a; color: #fff; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.78rem; font-weight: 600; position: relative; overflow: hidden; }
 .cna .cna-sidebar-item-icon-letter { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
-.cna .cna-sidebar-item-icon-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; border-radius: 4px; }
+.cna .cna-sidebar-item-icon-fa { position: absolute; inset: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 0.9rem; line-height: 1; color: #fff; }
+.cna .cna-sidebar-item[data-has-icon="true"] .cna-sidebar-item-icon-letter { display: none; }
 .cna .cna-sidebar-item[data-hidden="true"] .cna-sidebar-item-icon { background: #aaa; }
-.cna .cna-sidebar-item[data-hidden="true"] .cna-sidebar-item-icon-img { opacity: 0.55; }
+.cna .cna-sidebar-item[data-hidden="true"] .cna-sidebar-item-icon-fa { opacity: 0.7; }
 .cna .cna-sidebar-item-label { flex-grow: 1; font-size: 0.9rem; color: #1a1a1a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .cna .cna-sidebar-item-count { font-size: 0.78rem; color: #777; flex-shrink: 0; }
 .cna .cna-sidebar[data-collapsed="true"] .cna-sidebar-item-label,

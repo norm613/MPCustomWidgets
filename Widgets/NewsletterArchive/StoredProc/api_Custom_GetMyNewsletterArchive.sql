@@ -26,6 +26,21 @@
 --                         opt-out). Used by the widget sidebar to render a
 --                         small square Pub-identity avatar; falls back
 --                         client-side to a first-letter avatar when NULL.
+--                         SUPERSEDED by Schema/12 — see below.
+--   Phase 3c  Schema/10 — Added dp_Publications.Image_Name (Font Awesome
+--                         icon name, seeded from dp_Pages.Image_Name).
+--   Phase 3c  Schema/11 — Added dp_Communications.Omit_from_Archive BIT
+--                         (replaces Active as the archive-visibility gate;
+--                         see Schema/11 header for the rationale).
+--   Phase 3c  Schema/12 — SP rewrite combining 10 + 11:
+--                         (a) Dropped Publication_Default_Image_URL column
+--                             (the Tier-2-only dp_Files lookup is replaced
+--                             by Publication_Icon_Name from p.Image_Name).
+--                         (b) Added Publication_Icon_Name = p.Image_Name.
+--                         (c) Replaced WHERE c.Active = 1 with
+--                             WHERE COALESCE(c.Omit_from_Archive, 0) = 0.
+--                         Per-row Featured_Image_URL 4-tier cascade is
+--                         unchanged.
 --
 -- ----------------------------------------------------------------------------
 -- Called from: MPCustomWidgets framework with data-requireUser="true".
@@ -217,26 +232,24 @@ BEGIN
                  ORDER BY f4.Default_Image DESC, f4.UTC_Date_Added DESC)
             )
         END                    AS Featured_Image_URL,
-        -- Schema/09: Publication's own default image — Tier-2 lookup only,
-        -- no per-Pub opt-out, no Unsorted/Domain fallback. Used by the widget
-        -- sidebar as a square Pub-identity avatar. NULL if the Publication
-        -- has no dp_Files attached; widget falls back to first-letter avatar.
-        (SELECT TOP 1 @FileUrlPrefix + CAST(fp.Unique_Name AS NVARCHAR(36))
-         FROM dbo.dp_Files fp
-         WHERE fp.Page_ID  = @PubPageID
-           AND fp.Record_ID = c.Publication_ID
-           AND fp.Image_Width IS NOT NULL
-           AND COALESCE(fp.Publicly_Accessible, 1) = 1
-           AND fp.Domain_ID = @DomainID
-         ORDER BY fp.Default_Image DESC, fp.UTC_Date_Added DESC)
-                               AS Publication_Default_Image_URL
+        -- Schema/12: Publication's Font Awesome icon name (seeded from
+        -- dp_Pages.Image_Name in Schema/10; per-Pub override via MP UI).
+        -- Widget renders this as the sidebar avatar; falls back to a
+        -- first-letter monogram client-side when NULL. Replaces the prior
+        -- Publication_Default_Image_URL column (Tier-2 dp_Files lookup,
+        -- introduced in Schema/09).
+        p.Image_Name           AS Publication_Icon_Name
     FROM dbo.dp_Communications c
     INNER JOIN dbo.dp_Publications p
         ON p.Publication_ID = c.Publication_ID
     LEFT JOIN dbo.Contacts fc
         ON fc.Contact_ID = c.From_Contact
     WHERE c.Communication_Type_ID = @NewsletterArchiveTypeID
-      AND c.Active = 1
+      -- Schema/12: replaced c.Active = 1 with Omit_from_Archive = 0.
+      -- See Schema/11 header for rationale (MP auto-deactivates Active
+      -- after sending; Omit_from_Archive is the user-controlled,
+      -- archive-visibility flag with stable semantics).
+      AND COALESCE(c.Omit_from_Archive, 0) = 0
       AND c.Domain_ID = @DomainID
       AND (@Publication_ID IS NULL OR c.Publication_ID = @Publication_ID)
       AND (
@@ -260,4 +273,4 @@ BEGIN
 END
 GO
 
-PRINT 'Created procedure api_Custom_GetMyNewsletterArchive (current canonical form, post-migration-09).';
+PRINT 'Created procedure api_Custom_GetMyNewsletterArchive (current canonical form, post-migration-12).';

@@ -436,12 +436,24 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
     }
 
     // First non-space character of the title, uppercased — used as the
-    // collapsed-mode avatar inside the sidebar circle. Pubs lack stock
-    // icons; first-letter avatars are the natural analog.
+    // sidebar avatar fallback when the Publication has no Image_Name set
+    // (or as the always-rendered base layer beneath a FontAwesome icon).
     function pubInitial(title) {
         if (!title) return '?';
         var m = String(title).trim().match(/[A-Za-z0-9]/);
         return m ? m[0].toUpperCase() : '?';
+    }
+
+    // Sanitize a FontAwesome icon name from dp_Publications.Image_Name before
+    // emitting it as CSS class names. Allow lowercase letters, digits, hyphens,
+    // and spaces (so multi-class strings like "fa-newspaper fa-fw" pass through).
+    // Anything else gets stripped to prevent CSS class injection / XSS via the
+    // class attribute. Returns the cleaned class string or '' if nothing safe
+    // remains.
+    function sanitizeIconName(raw) {
+        if (!raw) return '';
+        var cleaned = String(raw).toLowerCase().replace(/[^a-z0-9\- ]/g, '').trim();
+        return cleaned;
     }
 
     // --- Expanded-view extraction --------------------------------------
@@ -626,12 +638,13 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
 
     // Derive the unique-publications list from a raw row set. Order matches
     // the SP's overall date-desc ordering (newest Pub first by its most-recent
-    // entry). Each entry: {id, title, count, imageUrl}.
-    //   imageUrl = the Pub's own default image (SP's Publication_Default_Image_URL,
-    //   Tier-2 lookup only; NULL if the Publication has no attached image file).
-    //   Captured from the first row encountered for each Pub. Used by the
-    //   sidebar to render a small square Pub-identity avatar; renderSidebarHtml
-    //   falls back to a first-letter avatar when imageUrl is missing.
+    // entry). Each entry: {id, title, count, iconName}.
+    //   iconName = the Pub's Font Awesome icon name (SP's Publication_Icon_Name,
+    //   read from dp_Publications.Image_Name; seeded from dp_Pages.Image_Name
+    //   in Schema/10, per-Pub override via MP UI). Captured from the first row
+    //   encountered for each Pub. Used by the sidebar to render a small
+    //   square Pub-identity avatar via FontAwesome (<i class="fa fas ...">);
+    //   renderSidebarHtml falls back to a first-letter avatar when missing.
     function derivePublications(rows) {
         var seen = {};
         var pubs = [];
@@ -643,7 +656,7 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                     id: id,
                     title: r.Publication_Title || '(Untitled)',
                     count: 0,
-                    imageUrl: r.Publication_Default_Image_URL || null
+                    iconName: r.Publication_Icon_Name || null
                 };
                 pubs.push(seen[key]);
             }
@@ -660,16 +673,21 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         var hasManualOrder = getPubSortOrder().length > 0;
         var items = pubs.map(function(p) {
             var isHidden = !!hidden[String(p.id)];
-            // Dual-layer avatar: first-letter span always renders behind; if the
-            // Pub has a default image attached in MP, an <img> overlays it. On
-            // image-load error the img hides itself and the letter shows through.
+            // Dual-layer avatar: first-letter span always renders behind; if
+            // the Pub has a FontAwesome icon name from dp_Publications.Image_Name,
+            // an <i> tag overlays it. Both `fa` and `fas` classes are emitted
+            // so the same icon name (e.g., `fa-newspaper-o` for FA 4 / `fa-newspaper`
+            // for FA 5+) renders correctly on whichever FontAwesome version the
+            // host page has loaded. The CSS uses :empty / has-content to hide
+            // the letter when an icon is present.
+            var iconClasses = p.iconName ? sanitizeIconName(p.iconName) : '';
             var iconInner =
                   '<span class="cna-sidebar-item-icon-letter" aria-hidden="true">' + escapeHtml(pubInitial(p.title)) + '</span>'
-                + (p.imageUrl
-                    ? '<img class="cna-sidebar-item-icon-img" src="' + escapeHtml(p.imageUrl) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+                + (iconClasses
+                    ? '<i class="cna-sidebar-item-icon-fa fa fas ' + escapeHtml(iconClasses) + '" aria-hidden="true"></i>'
                     : '');
             return ''
-                + '<button type="button" class="cna-sidebar-item" draggable="true" data-pub-id="' + escapeHtml(p.id) + '" data-hidden="' + (isHidden ? 'true' : 'false') + '" aria-pressed="' + (isHidden ? 'false' : 'true') + '" title="' + escapeHtml(p.title) + (isHidden ? ' (hidden)' : '') + ' — drag to reorder">'
+                + '<button type="button" class="cna-sidebar-item" draggable="true" data-pub-id="' + escapeHtml(p.id) + '" data-hidden="' + (isHidden ? 'true' : 'false') + '" data-has-icon="' + (iconClasses ? 'true' : 'false') + '" aria-pressed="' + (isHidden ? 'false' : 'true') + '" title="' + escapeHtml(p.title) + (isHidden ? ' (hidden)' : '') + ' — drag to reorder">'
                 +   '<span class="cna-sidebar-item-icon" aria-hidden="true">' + iconInner + '</span>'
                 +   '<span class="cna-sidebar-item-label">' + escapeHtml(p.title) + '</span>'
                 +   '<span class="cna-sidebar-item-count">' + p.count + '</span>'

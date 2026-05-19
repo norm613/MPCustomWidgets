@@ -32,6 +32,50 @@ widget. Falls back to `Congregation_ID`, then tenant-wide visibility.
 This is the canonical mechanism for restricting archive items to a curated
 group (e.g., parish council, school faculty, staff-only triage queue).
 
+### `dp_Publications.Image_Name` *(Schema/10)*
+
+```sql
+ALTER TABLE dbo.dp_Publications
+    ADD Image_Name NVARCHAR(50) NULL;
+-- Seed: existing Pubs get dp_Pages.Image_Name (for the dp_Publications page row),
+-- falling back to 'fa-newspaper-o' if dp_Pages has none set.
+```
+
+**Purpose:** Mirrors the `Image_Name` column on `dp_Pages` — a FontAwesome
+icon name (e.g., `fa-newspaper-o`, `fa-envelope-open`) per Publication.
+Used by the Newsletter Archive widget as each Pub's sidebar avatar.
+Replaces the prior dp_Files-based avatar approach (the Tier-2 lookup that
+became `Publication_Default_Image_URL` in Schema/09 — superseded by
+Schema/12).
+
+Per-Pub override: edit the Publication record in MP UI. Default for new
+Pubs: NULL (widget falls back to first-letter monogram).
+
+### `dp_Communications.Omit_from_Archive` *(Schema/11)*
+
+```sql
+ALTER TABLE dbo.dp_Communications
+    ADD Omit_from_Archive BIT NOT NULL
+        CONSTRAINT DF_dp_Communications_Omit_from_Archive DEFAULT (0);
+```
+
+**Purpose:** User-controlled "hide this Communication from the Newsletter
+Archive widget" flag. Defaults to `0` (show) for every Communication
+including existing rows. Replaces the use of `Active` as the widget's
+visibility gate.
+
+**Why a new column instead of reusing Active:** MP's `Active` field
+auto-flips `1 → 0` when a Communication finishes sending through MP's
+email pipeline (it removes the row from the active send queue). That
+behavior is correct for MP's send subsystem but wrong for the archive —
+"sent in the past" is exactly what we want to display. `Omit_from_Archive`
+gives us a separate, stable, user-controlled bit with a single semantic.
+
+Established 2026-05-18 via audit-log investigation of Communication 2992,
+which was created+sent in MP UI on 2026-05-18 and auto-deactivated by
+the send pipeline 6 seconds after creation, hiding it from the archive
+despite being a valid Newsletter_Archive entry.
+
 ### `dp_Publications.Use_First_Body_Image_For_Featured` *(Schema/08)*
 
 ```sql
@@ -147,7 +191,8 @@ Newsletter Archive entries, ordered by `Sent_Date DESC`, with the 4-tier
 | 04 | Added `Featured_Image_URL` (single-tier: Communication only) |
 | 07 | Expanded to 4-tier cascade: Communication → Publication → Unsorted (Pub 11) → Domain |
 | 08 | Added `CASE WHEN Use_First_Body_Image_For_Featured = 1 THEN NULL ELSE …` branch |
-| 09 | Added `Publication_Default_Image_URL` result column — Tier-2 lookup only (the Pub's own attached image), no per-Pub opt-out and no Unsorted/Domain fallback. Powers the widget sidebar's square Pub-identity avatar; widget falls back to a first-letter avatar when the column is NULL |
+| 09 | Added `Publication_Default_Image_URL` result column — Tier-2 lookup only. Used by sidebar avatar. *Superseded by 12.* |
+| 12 | Combined update: (a) dropped `Publication_Default_Image_URL`, replaced with `Publication_Icon_Name` reading from `p.Image_Name` (FA icon, no dp_Files lookup); (b) replaced filter `c.Active = 1` with `COALESCE(c.Omit_from_Archive, 0) = 0`. Per-row `Featured_Image_URL` cascade unchanged. |
 
 Current canonical state lives in `StoredProc/api_Custom_GetMyNewsletterArchive.sql`.
 The `Schema/0[4|7|8|9]-*.sql` files are migration steps — they exist for
@@ -234,6 +279,25 @@ WHERE p.Procedure_Name IN ('api_Custom_CreatePublicationArchive','api_Custom_Get
 SELECT Publication_ID, Title, Use_First_Body_Image_For_Featured
 FROM dbo.dp_Publications WHERE Publication_ID = 14;
 
+-- Migration 10: Image_Name column added; every existing Pub seeded
+SELECT * FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'dp_Publications' AND COLUMN_NAME = 'Image_Name';
+SELECT Publication_ID, Title, Image_Name FROM dbo.dp_Publications
+WHERE Domain_ID = 1 ORDER BY Publication_ID;
+
+-- Migration 11: Omit_from_Archive column added with NOT NULL DEFAULT 0
+SELECT * FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'dp_Communications' AND COLUMN_NAME = 'Omit_from_Archive';
+
+-- Migration 12: SP returns Publication_Icon_Name and filters Omit_from_Archive
+-- (replace @Username with any valid dp_Users.User_Name in your tenant).
+EXEC dbo.api_Custom_GetMyNewsletterArchive
+    @DomainID    = 1,
+    @Username    = 'John.Norman',
+    @Max_Results = 1;
+-- Expected columns include Publication_Icon_Name (no longer
+-- Publication_Default_Image_URL).
+
 -- Migration 09: SP returns Publication_Default_Image_URL in its result set.
 -- Run the SP as any authenticated user and confirm the column appears.
 -- (Substitute @Username for any valid dp_Users.User_Name in your tenant.)
@@ -285,33 +349,60 @@ For redeploying to a fresh MP tenant, run migrations in numeric order:
    references it via `COALESCE(p.Use_First_Body_Image_For_Featured, 0)`.
 
 For an incremental upgrade of an EXISTING deployment that pre-dates
-migration 09, also run:
+migration 12, also run (in order):
 
-7. `09-alter-sp-add-publication-default-image-url.sql` — adds the
-   `Publication_Default_Image_URL` column to the SP result set. The
-   widget gracefully degrades without this (avatars show first-letter
-   monograms), but applying it unlocks the per-Pub image avatars in the
-   sidebar.
+7. `09-alter-sp-add-publication-default-image-url.sql` — historical, only
+   needed if you want to rebuild the pre-12 SP. Superseded by 12.
+8. `10-add-pub-image-name-column.sql` — adds `Image_Name` to
+   `dp_Publications` and seeds every existing Pub from
+   `dp_Pages.Image_Name`. After this runs the column exists but the
+   SP doesn't return it yet — that's what 12 wires up.
+9. `11-add-comm-omit-from-archive-column.sql` — adds `Omit_from_Archive`
+   to `dp_Communications` with NOT NULL DEFAULT 0. Existing rows get 0
+   automatically; the widget will start showing every sent newsletter
+   regardless of `Active` flag once 12 is applied.
+10. `12-alter-sp-icon-name-and-omit-from-archive.sql` — SP rewrite. Drops
+    `Publication_Default_Image_URL` from the result set, adds
+    `Publication_Icon_Name = p.Image_Name`, replaces the WHERE filter
+    `c.Active = 1` with `COALESCE(c.Omit_from_Archive, 0) = 0`. Widget
+    avatar rendering changes from `<img>` overlay to FontAwesome `<i>`
+    overlay; the SP filter no longer excludes UI-composed-and-sent
+    Communications.
 
 For audit / rollback, each migration's idempotency check means a re-run
 just confirms state without making changes.
 
-### Attaching Publication default images (optional, MP UI)
+### Setting per-Publication icons (optional, MP UI)
 
-After migration 09 is applied, no image avatars will actually display in
-the sidebar until Publications have `dp_Files` rows attached. For each
-Publication that should display a custom image:
+After migration 10, every existing Publication is seeded with the same
+FontAwesome icon name pulled from `dp_Pages.Image_Name`. To customize an
+individual Publication's icon:
 
-1. In MP, open the **Publications** page record.
-2. Use the file-attachment UI to upload an image (recommended size:
-   1200×648 retina or 800×433 standard, landscape, `.jpg` or `.png`).
-3. Set `Default_Image = 1` on the new `dp_Files` row (MP's attach UI
-   typically prompts for this).
-4. Verify with the "Publications currently with a default-image attached"
-   query in the *Verification queries* section above.
+1. In MP, open the **Publications** page and select the record.
+2. Edit the `Image_Name` field. Browse [Font Awesome](https://fontawesome.com/v5/search?m=free)
+   for available icons; common picks for newsletters:
+   - `fa-newspaper-o` (FA 4) / `fa-newspaper` (FA 5+) — default seed
+   - `fa-envelope-open` / `fa-envelope-open-text`
+   - `fa-rss` / `fa-rss-square`
+   - `fa-bullhorn` (announcements)
+   - `fa-book-open` (publications / journals)
+3. Save. The widget picks up the new icon on the next page load — no
+   cache flush needed since the SP reads `dp_Publications.Image_Name`
+   live on every request.
 
-Publications without an attached default image will continue to show a
-first-letter monogram avatar — no error, just less visual identity.
+Publications with NULL `Image_Name` will show a first-letter monogram
+avatar — no error, just less visual identity.
+
+### Hiding individual Communications from the archive (optional, MP UI)
+
+After migration 11, every Communication has an `Omit_from_Archive` BIT
+defaulting to 0 (show). To hide a specific newsletter:
+
+1. In MP, open the Communication record.
+2. Set `Omit_from_Archive = 1` and save.
+
+The widget will exclude that row on its next load. To restore: flip the
+flag back to 0.
 
 ---
 

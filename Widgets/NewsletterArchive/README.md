@@ -25,6 +25,14 @@ For each `Publications` row, who can see it on the archive page:
    Household is in that Congregation.
 3. Else (both NULL) → visible to **all authenticated users**.
 
+In addition, every Communication has an **`Omit_from_Archive`** flag.
+When `Omit_from_Archive = 1` (or the column is NULL — defaults to FALSE),
+the SP returns the row. When set to `1` the row is excluded regardless
+of visibility cascade. This is the user-controlled "hide from archive"
+flag, separate from MP's `Active` flag (which is auto-managed by MP's
+email-send pipeline and unsuitable for archive gating — see Schema/11
+header for the full rationale).
+
 The widget is fully engagement-tracked — every page view, entry expand,
 link click, image zoom, view-control change, sidebar filter / sort /
 collapse action, and "Collapse all messages" click is recorded against
@@ -44,7 +52,10 @@ Widgets/NewsletterArchive/
 │   ├── 06-smoke-test.sql                                  — cross-tenant verification queries
 │   ├── 07-alter-sp-GetMyNewsletterArchive-image-cascade.sql — 4-tier dp_Files cascade
 │   ├── 08-add-pub-use-body-image-flag.sql                 — Use_First_Body_Image_For_Featured column + Pub 14 opt-in
-│   └── 09-alter-sp-add-publication-default-image-url.sql  — Publication_Default_Image_URL column (Tier-2 only) for sidebar avatars
+│   ├── 09-alter-sp-add-publication-default-image-url.sql  — Publication_Default_Image_URL (superseded by 12)
+│   ├── 10-add-pub-image-name-column.sql                   — dp_Publications.Image_Name (Font Awesome icon name, seeded from dp_Pages)
+│   ├── 11-add-comm-omit-from-archive-column.sql           — dp_Communications.Omit_from_Archive BIT (replaces Active filter)
+│   └── 12-alter-sp-icon-name-and-omit-from-archive.sql    — SP rewrite: drops Publication_Default_Image_URL, adds Publication_Icon_Name, filters Omit_from_Archive
 ├── StoredProc/
 │   ├── api_Custom_CreatePublicationArchive.sql            — PA-callable ingestion target
 │   └── api_Custom_GetMyNewsletterArchive.sql              — widget-callable cascade reader (current canonical state)
@@ -79,14 +90,24 @@ small square Pub-identity avatar, the publication title, and a count of
 how many entries are currently in the dataset for that publication. The
 row dims when hidden.
 
-The avatar uses the Publication's own default image (the SP's
-`Publication_Default_Image_URL` — Tier-2 lookup, no fallback to Unsorted
-or Domain) rendered as a 26×26 square with 4px rounded corners and
-`object-fit: cover` center-crop. When the Publication has no `dp_Files`
-image attached (or the image fails to load at runtime), the avatar falls
-back to a first-letter monogram on the same square. Both layers render in
-the same slot — the image is overlaid on top of an always-rendered letter
-span, so a fallback is automatic on image error.
+The avatar renders a **FontAwesome icon** from
+`dp_Publications.Image_Name` (e.g. `fa-newspaper-o`, `fa-envelope-open`,
+or any other FA icon name the operator sets on the Publication record in
+MP). The widget emits both `fa` and `fas` classes so the same name
+renders correctly on whichever FontAwesome version the host page has
+loaded (Enfold ships FA by default on cppnebraska.org).
+
+Each avatar is a 26×26 square with 4px rounded corners on a CPP-blue
+background. When the Publication's `Image_Name` is NULL, the slot falls
+back to a first-letter monogram on the same square. Both layers are
+rendered in the same DOM slot — the letter is always present as the
+base layer, with the FA `<i>` overlaying it when an icon name is
+provided.
+
+Per migration 10, every existing Publication is seeded with the same icon
+value that `dp_Pages.Image_Name` holds for the dp_Publications row, so
+all Pubs start with the platform-level default. Per-Pub customization
+is a simple edit to the Publication record in MP UI.
 
 A collapse button at the top of the sidebar shrinks the rail to a 56px
 icon-only column (only the square avatars — image or first-letter
@@ -191,23 +212,25 @@ All tiers skip tracker pixels (< 50×50), `data:` URIs, `javascript:`/
 
 If neither phase yields anything, the slot renders a dashed placeholder.
 
-### Sidebar avatar (Tier-2-only, independent of the cascade)
+### Sidebar avatar (FontAwesome icon — independent of the cascade)
 
 Separately from the per-row `Featured_Image_URL` cascade, the SP returns a
-`Publication_Default_Image_URL` column on every row — resolved using only
-the Tier-2 lookup (`dp_Files` attached to the Publication's record). No
-fallback to Unsorted or Domain, and no bypass via the
-`Use_First_Body_Image_For_Featured` flag (that flag affects per-row
-featured images only; the Pub's identity image is needed independently
-for the sidebar).
+`Publication_Icon_Name` column on every row — the value of
+`dp_Publications.Image_Name`, which holds a FontAwesome icon name per
+Publication. The widget captures this once per Publication when deriving
+the sidebar pubs list and renders a FA `<i>` tag inside the avatar slot.
 
-The widget captures this URL once per Publication (first-row-encountered)
-when deriving the sidebar's pubs list, and uses it as the source for
-each Pub's square avatar. When the column is `NULL` (the Pub has no
-attached image), the widget falls back to a first-letter monogram on the
-same 26×26 square.
+This replaces the previous Tier-2 `dp_Files`-based avatar approach (the
+`Publication_Default_Image_URL` column introduced in Schema/09). The
+icon-based approach is simpler architecturally — operators set an icon
+name on the Pub record in MP UI rather than uploading and attaching
+image files — and works without dp_Files attachments.
 
-Schema migration: `Schema/09-alter-sp-add-publication-default-image-url.sql`.
+Schema migrations:
+- `Schema/10-add-pub-image-name-column.sql` — column add + seed from
+  `dp_Pages.Image_Name`
+- `Schema/12-alter-sp-icon-name-and-omit-from-archive.sql` — SP rewrite
+  exposing `Publication_Icon_Name`
 
 ### Per-Publication opt-out
 
@@ -305,13 +328,14 @@ portrait uploads (heavy center-crop, often loses subject).
 5. The `Publications` row titled `Unsorted` (Pub 11) is seeded by
    `02-seed-lookup-data.sql`; `api_Custom_CreatePublicationArchive`
    routes to it when no other publication matches.
-6. **Attach default images to Publications via MP UI** (optional — gates
-   the sidebar avatar). For each Publication that should display a custom
-   image in the widget sidebar's left rail, attach a `dp_Files` record
-   to the Publication's MP record with `Default_Image = 1` and a
-   landscape image (ideally 800×433 or 1200×648 — see *Image dimensions*).
-   Publications without an attached default image will fall back to a
-   first-letter monogram avatar — no error, just less visual identity.
+6. **Set per-Publication icons via MP UI** (optional — every Pub starts
+   seeded by migration 10 from `dp_Pages.Image_Name`). To override the
+   default for any Publication, edit its `Image_Name` field in MP to a
+   FontAwesome icon name (`fa-newspaper-o`, `fa-bullhorn`, etc.). Browse
+   the [Font Awesome library](https://fontawesome.com/v5/search?m=free)
+   for the catalog. NULL `Image_Name` falls back to a first-letter
+   monogram avatar — no error, just less visual identity. See
+   DATABASE.md for the icon-naming convention.
 
 See **DATABASE.md** for the full migration history and what each migration
 changed in production.
