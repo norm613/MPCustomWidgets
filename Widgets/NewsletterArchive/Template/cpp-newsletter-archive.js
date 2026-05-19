@@ -468,17 +468,24 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         },
 
         // Does a single row match the active search term?
+        // Body matching uses the SANITIZED body (Mailchimp chrome stripped,
+        // <script>/<style> removed) so that search isn't polluted by
+        // platform chrome — e.g., searching "Twitter" shouldn't hit every
+        // Mailchimp campaign just because the chrome had a Twitter share.
+        // Shares a per-row sanitization cache (`_cnaSanitizedBody`) with
+        // renderEntryHtml so we only DOMParse each row once per session.
         matches: function(r) {
             if (!this.term) return true;
             var t = this.term;
             if ((r.Subject || '').toLowerCase().indexOf(t) >= 0) return true;
             if ((r.Publication_Title || '').toLowerCase().indexOf(t) >= 0) return true;
-            // Lazy-cache the plaintext body per row to amortize DOMParser cost.
             if (!r._cnaSearchBody) {
-                r._cnaSearchBody = noReGreps.plaintext(r.Body);
+                if (!r._cnaSanitizedBody) {
+                    r._cnaSanitizedBody = sanitizeBodyForDisplay(r.Body);
+                }
+                r._cnaSearchBody = noReGreps.plaintext(r._cnaSanitizedBody);
             }
-            if (r._cnaSearchBody.indexOf(t) >= 0) return true;
-            return false;
+            return r._cnaSearchBody.indexOf(t) >= 0;
         },
 
         // Filter a row array by the active search term. Returns the input
@@ -598,13 +605,31 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         } catch (e) { return null; }
     }
 
-    // Strip universal email chrome from body HTML before rendering or scanning.
-    // - Outlook external-sender caution banner ("You don't often get email from..." /
-    //   "CAUTION: This email originated from outside your organization...")
-    // - 1x1 / 2x2 tracker pixels (SendGrid open-tracker, similar analytics beacons)
-    // Returns sanitized innerHTML. Fails open: on parse error returns the original.
-    // Universal-only for now; AxiosHQ-specific chrome (masthead/footer) left intact
-    // to preserve publication identity in expanded view.
+    // Strip universal email-chrome from body HTML before rendering or scanning.
+    // Applied at render time, so the SP-stored Body is left alone and every
+    // ingestion source (PA Converter for live mail, Mailchimp archive scrape
+    // for backfill, future vendors) benefits without re-import.
+    //
+    // What gets stripped:
+    //   1. Outlook external-sender caution banner ("You don't often get email
+    //      from..." / "CAUTION: This email originated from outside...")
+    //   2. 1x1 / 2x2 tracker pixels (SendGrid open-tracker, similar beacons)
+    //   3. <script> and <style> blocks — defensive XSS-prevention plus they
+    //      pollute the plaintext extraction used for preview + search
+    //   4. Mailchimp archive chrome — the toolbar block (#awesomewrap with
+    //      its Campaign URL / Copy / Twitter / Subscribe / Past Issues / RSS
+    //      / Translate menu + the full 70-language translate list), plus
+    //      the "View this email in your browser" link block. Triggered only
+    //      when the body's <body> element has id="archivebody" (Mailchimp's
+    //      tell-tale archive marker), so non-Mailchimp content isn't affected.
+    //
+    // Publication-branded headers + footers (church mastheads, copyright,
+    // social-icon blocks, "Update your preferences", "Unsubscribe") are
+    // INTENTIONALLY preserved — those are the publisher's identity, not
+    // platform chrome.
+    //
+    // Returns sanitized innerHTML. Fails open: on parse error returns the
+    // original.
     function sanitizeBodyForDisplay(bodyHtml) {
         if (!bodyHtml) return '';
         try {
@@ -612,8 +637,8 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
             var doc = parser.parseFromString(bodyHtml, 'text/html');
 
             // 1. Strip Outlook external-sender caution banner.
-            //    Look for tables/divs whose textContent matches the caution patterns
-            //    AND are small enough to be the banner (not the whole body).
+            //    Look for tables/divs whose textContent matches the caution
+            //    patterns AND are small enough to be the banner (not the whole body).
             var bannerPattern = /You don't often get email from|CAUTION:\s*This email originated from outside/i;
             doc.querySelectorAll('table, div').forEach(function(el) {
                 if (!el.parentNode) return; // already removed via ancestor
@@ -633,6 +658,56 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
                     if (img.parentNode) img.parentNode.removeChild(img);
                 }
             });
+
+            // 3. Strip <script> and <style> blocks (defensive + cleanup).
+            doc.querySelectorAll('script, style').forEach(function(n) {
+                if (n.parentNode) n.parentNode.removeChild(n);
+            });
+
+            // 4. Mailchimp archive chrome — only triggers on Mailchimp-archive
+            //    bodies (detected via <body id="archivebody">). This avoids
+            //    accidentally stripping content from non-Mailchimp sources
+            //    that happen to use similar markup.
+            var isMailchimpArchive =
+                (doc.body && doc.body.id === 'archivebody') ||
+                doc.getElementById('awesomewrap') ||
+                doc.getElementById('awesomebar');
+            if (isMailchimpArchive) {
+                // 4a. Remove the entire toolbar wrapper (Campaign URL +
+                //     Twitter share + Subscribe/Past Issues/RSS + Translate
+                //     menu + 70-language list). ~13KB on a typical campaign.
+                var awesomewrap = doc.getElementById('awesomewrap');
+                if (awesomewrap && awesomewrap.parentNode) {
+                    awesomewrap.parentNode.removeChild(awesomewrap);
+                }
+                // Belt-and-suspenders: some Mailchimp templates wrap with
+                // #awesomebar instead of (or in addition to) #awesomewrap.
+                var awesomebar = doc.getElementById('awesomebar');
+                if (awesomebar && awesomebar.parentNode) {
+                    awesomebar.parentNode.removeChild(awesomebar);
+                }
+
+                // 4b. Strip the small "View this email in your browser" block.
+                //     Walk anchor tags, match canonical text, remove the
+                //     nearest small ancestor (table row, paragraph, or div)
+                //     so we don't accidentally remove a substantive section.
+                var browserPattern = /^\s*view this email in your browser\s*$/i;
+                doc.querySelectorAll('a').forEach(function(a) {
+                    var t = (a.textContent || '').trim();
+                    if (!browserPattern.test(t)) return;
+                    var container = a.closest ? a.closest('tr, td, p, div') : null;
+                    if (container && (container.textContent || '').length < 200) {
+                        // Climb to the row level if we matched a <td> so we
+                        // remove the whole row, not just a cell mid-row.
+                        var row = container.closest ? container.closest('tr') : null;
+                        if (row && (row.textContent || '').length < 250) {
+                            row.parentNode && row.parentNode.removeChild(row);
+                        } else {
+                            container.parentNode && container.parentNode.removeChild(container);
+                        }
+                    }
+                });
+            }
 
             return doc.body ? doc.body.innerHTML : bodyHtml;
         } catch (e) {
@@ -682,10 +757,15 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
     // markup is reused whether we're rendering a flat inbox list or a
     // grouped-by-publication section.
     function renderEntryHtml(r) {
-        // Sanitize body once per row — strips Outlook external-sender caution banner
-        // and 1x1 tracker pixels. Used for both image extraction (so we don't pick
-        // tracker pixels or banner glyphs) AND body rendering (cleaner expanded view).
-        var sanitizedBody = sanitizeBodyForDisplay(r.Body);
+        // Sanitize body once per row, cached on the row object so noReGreps
+        // search and per-render extraction share the same cleaned source.
+        // Strips: Outlook caution banner, tracker pixels, <script>/<style>,
+        // and Mailchimp archive chrome (#awesomewrap + "View in browser").
+        // See sanitizeBodyForDisplay header for full details.
+        if (!r._cnaSanitizedBody) {
+            r._cnaSanitizedBody = sanitizeBodyForDisplay(r.Body);
+        }
+        var sanitizedBody = r._cnaSanitizedBody;
 
         // Featured image preference cascade:
         //   1. SP-provided Featured_Image_URL (server-side 4-tier dp_Files cascade)
