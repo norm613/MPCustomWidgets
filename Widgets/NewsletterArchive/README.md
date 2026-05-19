@@ -311,18 +311,44 @@ Established flags (as of `eebb0b4`):
 ## Body sanitization
 
 Before render and image extraction, each entry's body HTML is passed through
-`sanitizeBodyForDisplay()`. It strips two universal email-chrome elements:
+`sanitizeBodyForDisplay()`. Sanitization is per-row cached on the row object
+(`_cnaSanitizedBody`) so the search index and the render path share the same
+cleaned source.
+
+What gets stripped:
 
 1. **Outlook external-sender caution banner** ("You don't often get email
    from..." / "CAUTION: This email originated from outside..."). Detected
    by `textContent` pattern AND size constraint (< 600 chars, to avoid
    stripping a whole body that happens to mention the word "caution").
 2. **1×1 / 2×2 tracker pixels** (SendGrid open-trackers, similar beacons).
+3. **`<script>` and `<style>` blocks** — defensive (XSS prevention against
+   any source) and cleans up the plaintext extraction used for preview text
+   + `noReGreps` search.
+4. **Mailchimp archive chrome** — only when the body's `<body>` element has
+   `id="archivebody"` (Mailchimp's archive-view marker). Two specific
+   removals:
+   - **`<div id="awesomewrap">`** — the entire toolbar with "Campaign URL /
+     Copy / Twitter / Subscribe / Past Issues / RSS / Translate" plus the
+     full ~70-language translate list. ~13.5 KB on a typical campaign.
+     Without this strip, the toolbar's text leaks into the compact-view
+     preview ("Campaign URL Copy Twitter 0 tweets Subscribe Past Issues
+     RSS Translate English العربية Afrikaans...") and into search indexing.
+   - **"View this email in your browser"** wrapping block — removed by
+     anchor-text match + nearest small ancestor (table row preferred).
 
-AxiosHQ-specific chrome (masthead/footer) is left intact to preserve
-publication identity in expanded view.
+Publication-branded headers + footers (church mastheads, copyright
+notices, social-icon blocks, "Update preferences" / "Unsubscribe" links)
+are **intentionally preserved** — those are the publisher's identity, not
+platform chrome.
 
-Sanitization fails open — on parse error the original HTML is returned.
+AxiosHQ-specific chrome is also left intact for the same reason.
+
+Sanitization runs at **render time** on every row, so it applies
+retroactively to historical rows (no data churn / no UPDATE pass needed)
+and prospectively to every future arrival via the PA Converter flow.
+
+Fails open: on parse error the original HTML is returned unchanged.
 
 ## Image dimensions (MP 59:32 standard)
 
