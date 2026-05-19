@@ -456,6 +456,34 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
         return cleaned;
     }
 
+    // Ensure Font Awesome 6 is loaded on the page. The host theme (Enfold)
+    // ships its own icon font on some builds rather than Font Awesome, and on
+    // others ships FA 4 which doesn't recognize FA 5+ icon names like
+    // 'fa-newspaper' (FA 4 used 'fa-newspaper-o'). Inject a FA 6 free
+    // stylesheet from cdnjs if nothing FA-looking is already on the page.
+    // FA 6 honors both new prefixes (fa-solid) and legacy (fas / fa) — our
+    // <i> tag emits "fa fas <name>", which renders correctly under FA 6 free.
+    function ensureFontAwesomeLoaded() {
+        try {
+            var existing = document.querySelector(
+                'link[rel="stylesheet"][href*="font-awesome"],' +
+                'link[rel="stylesheet"][href*="fontawesome"]'
+            );
+            if (existing) {
+                dbg('FontAwesome: existing stylesheet detected, skipping injection', { href: existing.href });
+                return;
+            }
+            dbg('FontAwesome: injecting FA 6 free from cdnjs');
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css';
+            link.crossOrigin = 'anonymous';
+            document.head.appendChild(link);
+        } catch (e) {
+            dbg('!! FontAwesome injection failed', { error: String(e) });
+        }
+    }
+
     // --- Expanded-view extraction --------------------------------------
     // Pull a featured image + preview snippet from the email Body HTML.
     // Used only when view-mode = expanded; lazy-computed per render.
@@ -1274,6 +1302,7 @@ window.MPCustomWidgetsConfig = { mpHost: 'mp.archomaha.org' };
             mppUserLoginRegistered: customElementInfo('mpp-user-login'),
             storageAtDOMReady: dumpStorage()
         });
+        ensureFontAwesomeLoaded();
         refreshAuthStatus();
         setTimeout(loadNewsletters, 250);
         // Defensive: if forceLogin's `?mpCustomWidgetAuth=true` flag is in the
