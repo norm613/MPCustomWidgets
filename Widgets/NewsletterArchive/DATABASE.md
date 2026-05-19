@@ -150,9 +150,11 @@ Newsletter Archive entries, ordered by `Sent_Date DESC`, with the 4-tier
 | 09 | Added `Publication_Default_Image_URL` result column — Tier-2 lookup only (the Pub's own attached image), no per-Pub opt-out and no Unsorted/Domain fallback. Powers the widget sidebar's square Pub-identity avatar; widget falls back to a first-letter avatar when the column is NULL |
 
 Current canonical state lives in `StoredProc/api_Custom_GetMyNewsletterArchive.sql`.
-The `Schema/0[4|7|8]-*.sql` files are migration steps — they exist for
+The `Schema/0[4|7|8|9]-*.sql` files are migration steps — they exist for
 ordered redeployment to a fresh environment. Once applied, the SP body
-matches the StoredProc/ file.
+matches the StoredProc/ file. For a fresh tenant deploy, you can skip
+the historical migration alters (04 / 07 / 08 / 09) entirely by running
+the canonical SP file — it already reflects post-09 state.
 
 ---
 
@@ -231,6 +233,34 @@ WHERE p.Procedure_Name IN ('api_Custom_CreatePublicationArchive','api_Custom_Get
 -- Brother's Keeper has the body-image opt-in flag
 SELECT Publication_ID, Title, Use_First_Body_Image_For_Featured
 FROM dbo.dp_Publications WHERE Publication_ID = 14;
+
+-- Migration 09: SP returns Publication_Default_Image_URL in its result set.
+-- Run the SP as any authenticated user and confirm the column appears.
+-- (Substitute @Username for any valid dp_Users.User_Name in your tenant.)
+EXEC dbo.api_Custom_GetMyNewsletterArchive
+    @DomainID    = 1,
+    @Username    = 'John.Norman',
+    @Max_Results = 1;
+-- Expected columns include: Communication_ID, Subject, Body, Sent_Date,
+-- From_Contact, From_Display_Name, From_Email, Publication_ID,
+-- Publication_Title, Publication_Description, Available_Online,
+-- Congregation_ID, Targeted_Audience_ID, Visibility_Tier,
+-- Featured_Image_URL, AND Publication_Default_Image_URL.
+
+-- How many Publications currently have a default-image attached
+-- (i.e., will show an image avatar in the widget sidebar rather than a
+-- first-letter monogram)?
+SELECT p.Publication_ID, p.Title,
+       (SELECT COUNT(*) FROM dbo.dp_Files f
+        INNER JOIN dbo.dp_Pages pg ON pg.Page_ID = f.Page_ID
+        WHERE pg.Table_Name = 'dp_Publications'
+          AND f.Record_ID = p.Publication_ID
+          AND f.Image_Width IS NOT NULL
+          AND COALESCE(f.Publicly_Accessible, 1) = 1
+          AND f.Domain_ID = p.Domain_ID) AS Attached_Image_Count
+FROM dbo.dp_Publications p
+WHERE p.Domain_ID = 1
+ORDER BY Attached_Image_Count DESC, p.Title;
 ```
 
 `Schema/06-smoke-test.sql` runs an expanded version of these checks.
@@ -241,21 +271,47 @@ FROM dbo.dp_Publications WHERE Publication_ID = 14;
 
 For redeploying to a fresh MP tenant, run migrations in numeric order:
 
-1. `01-add-targeted-audience-column.sql` — column add
+1. `01-add-targeted-audience-column.sql` — column add (`Targeted_Audience_ID`)
 2. `02-seed-lookup-data.sql` — Audience + Unsorted Pub
 3. (Run the StoredProc/ files at this point — they create the SPs in their
-   current canonical state. Migrations `03`/`04`/`07` were historical
-   alters; in a fresh deploy you skip them by running the final SP file
-   directly.)
+   current canonical state, which is post-09. Migrations 03/04/07/09 are
+   historical SP alters; in a fresh deploy you skip them by running the
+   final SP file directly.)
 4. `05-register-procedures.sql` — register + role-grant
 5. `06-smoke-test.sql` — verify
-6. `08-add-pub-use-body-image-flag.sql` — column add + flag set + final SP
-   alter (this last one only matters if you've already run the older SP
-   body from `StoredProc/`; if you ran the current canonical file, the SP
-   is already at the post-08 state)
+6. `08-add-pub-use-body-image-flag.sql` — column add (`Use_First_Body_Image_For_Featured`)
+   + opt-in flag set + SP alter to honor the flag. Required even on
+   fresh deploy because it ADDS a column; the canonical SP file
+   references it via `COALESCE(p.Use_First_Body_Image_For_Featured, 0)`.
+
+For an incremental upgrade of an EXISTING deployment that pre-dates
+migration 09, also run:
+
+7. `09-alter-sp-add-publication-default-image-url.sql` — adds the
+   `Publication_Default_Image_URL` column to the SP result set. The
+   widget gracefully degrades without this (avatars show first-letter
+   monograms), but applying it unlocks the per-Pub image avatars in the
+   sidebar.
 
 For audit / rollback, each migration's idempotency check means a re-run
 just confirms state without making changes.
+
+### Attaching Publication default images (optional, MP UI)
+
+After migration 09 is applied, no image avatars will actually display in
+the sidebar until Publications have `dp_Files` rows attached. For each
+Publication that should display a custom image:
+
+1. In MP, open the **Publications** page record.
+2. Use the file-attachment UI to upload an image (recommended size:
+   1200×648 retina or 800×433 standard, landscape, `.jpg` or `.png`).
+3. Set `Default_Image = 1` on the new `dp_Files` row (MP's attach UI
+   typically prompts for this).
+4. Verify with the "Publications currently with a default-image attached"
+   query in the *Verification queries* section above.
+
+Publications without an attached default image will continue to show a
+first-letter monogram avatar — no error, just less visual identity.
 
 ---
 

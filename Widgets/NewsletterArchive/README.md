@@ -3,9 +3,17 @@
 Authenticated-only archive of past publications (bulletins, newsletters, meeting
 notes, etc.) for a logged-in MP user. Each archived item is rendered as a
 clickable entry that expands to show the full HTML body inline. Images open in
-a lightbox with keyboard navigation. A collapsible left sidebar lists the
-publications in the result set and lets the user filter which ones are
-visible; two orthogonal toolbar toggles control grouping and display density.
+a lightbox with keyboard navigation. A sticky, collapsible left sidebar
+(titled **Newsletters** in the UI) lists the publications in the result set
+with a per-Pub avatar, lets the user filter and reorder them, and exposes a
+"Collapse all messages" footer button. Two orthogonal toolbar toggles control
+grouping and display density.
+
+> **Terminology note.** The MP data model calls these records `Publications`,
+> and that's the technical name used throughout the schema, the SP body,
+> engagement event labels, and most of this document. The user-facing rail
+> is titled **Newsletters** to match how parishioners think about the
+> content (newsletter issues grouped by publication series).
 
 ## Visibility cascade
 
@@ -17,9 +25,11 @@ For each `Publications` row, who can see it on the archive page:
    Household is in that Congregation.
 3. Else (both NULL) → visible to **all authenticated users**.
 
-The widget is engagement-tracked: page-view, expand-to-read, image-zoom, link
-click, view-mode change, and grouping change events are recorded against
-`api_Custom_LogClick` for downstream analysis.
+The widget is fully engagement-tracked — every page view, entry expand,
+link click, image zoom, view-control change, sidebar filter / sort /
+collapse action, and "Collapse all messages" click is recorded against
+`api_Custom_LogClick` for downstream analysis. See the **Engagement
+events** section near the bottom of this file for the full table.
 
 ## Files
 
@@ -48,10 +58,11 @@ each migration does.
 
 ## View options
 
-Three independent dimensions, each persisted to `localStorage`. The four
-combinations of grouping × density combine with the publication filter so
-the user can land on any of `2 × 2 × 2^N` view states (where N is the
-number of publications in the result set).
+Five user-controlled dimensions, each persisted to its own `localStorage`
+key. All combinations compose freely — filter runs before grouping; the
+manual sort order affects both the sidebar list and the By-Publication
+group order; density only affects per-entry rendering; sidebar width is
+purely visual.
 
 | Control | Values | localStorage key | Default |
 |---|---|---|---|
@@ -78,7 +89,9 @@ the same slot — the image is overlaid on top of an always-rendered letter
 span, so a fallback is automatic on image error.
 
 A collapse button at the top of the sidebar shrinks the rail to a 56px
-icon-only column (first-letter avatars only). At the bottom of the rail,
+icon-only column (only the square avatars — image or first-letter
+fallback — remain visible; labels and counts are hidden). At the bottom
+of the rail,
 "Show all" clears the hidden set, and "Hide all" marks every currently-known
 publication hidden — the second is useful for "filter to a single Pub" (hide
 all, then click one). The filter runs before grouping, so all combinations
@@ -178,6 +191,24 @@ All tiers skip tracker pixels (< 50×50), `data:` URIs, `javascript:`/
 
 If neither phase yields anything, the slot renders a dashed placeholder.
 
+### Sidebar avatar (Tier-2-only, independent of the cascade)
+
+Separately from the per-row `Featured_Image_URL` cascade, the SP returns a
+`Publication_Default_Image_URL` column on every row — resolved using only
+the Tier-2 lookup (`dp_Files` attached to the Publication's record). No
+fallback to Unsorted or Domain, and no bypass via the
+`Use_First_Body_Image_For_Featured` flag (that flag affects per-row
+featured images only; the Pub's identity image is needed independently
+for the sidebar).
+
+The widget captures this URL once per Publication (first-row-encountered)
+when deriving the sidebar's pubs list, and uses it as the source for
+each Pub's square avatar. When the column is `NULL` (the Pub has no
+attached image), the widget falls back to a first-letter monogram on the
+same 26×26 square.
+
+Schema migration: `Schema/09-alter-sp-add-publication-default-image-url.sql`.
+
 ### Per-Publication opt-out
 
 When a Publication's content is best represented by its per-issue body image
@@ -265,7 +296,7 @@ portrait uploads (heavy center-crop, often loses subject).
    (sandbox first, then prod when verified). Each migration is idempotent
    (guarded with `INFORMATION_SCHEMA.COLUMNS` or `EXISTS` checks).
 2. Run both files in `StoredProc/` to create / replace the two SPs. The SP
-   files reflect current canonical production state.
+   files reflect current canonical production state (post-migration-09).
 3. The `05-register-procedures.sql` migration handles `dp_API_Procedures`
    registration and `dp_Role_API_Procedures` grants — adjust the role IDs
    if your tenant differs.
@@ -274,6 +305,13 @@ portrait uploads (heavy center-crop, often loses subject).
 5. The `Publications` row titled `Unsorted` (Pub 11) is seeded by
    `02-seed-lookup-data.sql`; `api_Custom_CreatePublicationArchive`
    routes to it when no other publication matches.
+6. **Attach default images to Publications via MP UI** (optional — gates
+   the sidebar avatar). For each Publication that should display a custom
+   image in the widget sidebar's left rail, attach a `dp_Files` record
+   to the Publication's MP record with `Default_Image = 1` and a
+   landscape image (ideally 800×433 or 1200×648 — see *Image dimensions*).
+   Publications without an attached default image will fall back to a
+   first-letter monogram avatar — no error, just less visual identity.
 
 See **DATABASE.md** for the full migration history and what each migration
 changed in production.
