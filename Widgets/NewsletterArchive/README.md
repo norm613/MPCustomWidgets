@@ -82,6 +82,7 @@ purely visual.
 | **Sidebar width** | expanded / collapsed (icon-only) | `cna-sidebar-collapsed` (`0`/`1`) | expanded |
 | **Grouping** | Inbox / By Publication | `cna-grouping` | `inbox` |
 | **Display density** | Compact / Expanded | `cna-view-mode` | `compact` |
+| **Search (`noReGreps`)** | substring filter on Subject + Publication Title + plaintext body | (in-memory; not persisted) | empty |
 
 **Newsletters sidebar (left rail)** lists every publication that appears
 in the current SP result set. Each row is a clickable toggle that shows or
@@ -150,6 +151,35 @@ row closes every currently-expanded entry in the main listing. Acts
 directly on the DOM (no re-render) so scroll position is preserved. In
 collapsed-rail mode the button shrinks to its icon (↥); in mobile pill-
 row mode the button remains visible in the actions area.
+
+**Search (`noReGreps`).** A search input sits above the toolbar. Typing
+filters the loaded entries by case-insensitive substring match against:
+
+1. `Subject`
+2. `Publication_Title`
+3. Plaintext-extracted body (HTML stripped, lazy-cached per row on first
+   match attempt so re-typing doesn't re-parse huge bodies)
+
+Debounced 300ms; Enter commits immediately; Escape clears. The Clear
+(×) button on the right of the input wipes the term in one click.
+
+While a search is active:
+- The sidebar's per-Pub counts override to reflect **matches** in that
+  Pub (not total entries), so the rail tells you where the matches live.
+- The summary line reads "N matches for &lsquo;term&rsquo; in the loaded
+  M newsletters."
+- Pubs with zero matches still show in the sidebar (with count 0) so the
+  user can clear the search and get back to the full list trivially.
+
+**Phase 1 scope (current):** searches only the currently-loaded N entries
+(N = `MAX_RESULTS` in the widget config, default 25). Phase 2 (future
+follow-on) will add a "Search older archives" button that POSTs to the
+SP with `@Search` populated, lifting search beyond the loaded window to
+the full MP archive.
+
+The search logic lives in a single `noReGreps` namespace at the top of
+the widget JS, so it can be lifted into a shared module if/when other
+widgets need the same primitive.
 
 On screens narrower than 800px the sidebar reflows to a horizontal
 scrolling pill row above the toolbar — no off-canvas drawer.
@@ -434,6 +464,7 @@ The widget fires these `api_Custom_LogClick` events:
 | `newsletter-pub-sort` | User reorders the sidebar (label = `reorder`, target = `<srcId>-><tgtId>:before\|after`) or resets it (label = `reset`) |
 | `newsletter-sidebar-collapse` | User toggles the sidebar to collapsed / expanded |
 | `newsletter-collapse-all` | User clicks "Collapse all messages" (target = number of entries that were expanded at click time) |
+| `newsletter-search` | User commits a `noReGreps` search (label = `filter` or `clear`; target = first 100 chars of the term) |
 
 Each event records page URL, page title, target identifier, session ID,
 user agent, and referrer.
